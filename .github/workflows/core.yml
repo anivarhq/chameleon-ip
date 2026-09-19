@@ -47,10 +47,8 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-          gomobile init
-          gomobile bind -v -target=android/arm64 \
+          go tool gomobile init
+          go tool gomobile bind -v -target=android/arm64 \
             -ldflags="-s -w -extldflags=-Wl,-z,max-page-size=16384" \
             -o chameleon.aar ./mobile
 
@@ -85,9 +83,7 @@ jobs:
       - name: gomobile bind (xcframework)
         working-directory: core
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-          gomobile init
-          gomobile bind -v -target=ios,iossimulator,macos \
+          go tool gomobile init
+          go tool gomobile bind -v -target=ios,iossimulator,macos \
             -o Chameleon.xcframework ./mobile
           ls -R Chameleon.xcframework | head -30
