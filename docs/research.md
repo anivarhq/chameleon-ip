@@ -174,7 +174,23 @@ Costs of the Go route, all real: gomobile is officially experimental with no tag
 
 Production users of gomobile: Tailscale Android, Psiphon, Berty, Outline.
 
-**Decision:** unresolved. A spike (gortsplib under gomobile, a 16 KB-aligned AAR, an iOS xcframework on a current Xcode) settles it with evidence before the per-platform servers are written.
+### The spike: it works (2026-09-19)
+
+`core/` is that shared core, ~350 lines over gortsplib, and [CI](../.github/workflows/core.yml) builds it for both mobile platforms. Measured, not assumed:
+
+| Question | Result |
+|---|---|
+| Serves a real player? | ffmpeg pulls 1280×720 at 15 fps over TCP, with Digest auth; a wrong password gets 401 |
+| Keyframe on join? | fires |
+| Builds for Apple? | xcframework for iOS, simulator and macOS, on a current Xcode |
+| Builds for Android? | `.aar`, arm64, **3.26 MB** |
+| 16 KB page-aligned? | yes, `0x4000`, checked in CI with `llvm-readelf` |
+
+Two failures worth keeping: gomobile refuses to bind unless `golang.org/x/mobile` is a tool dependency of the module, and it still defaults to Android API 16, which NDK r28 rejects (21..35). Both are one-line fixes, now in the workflow.
+
+Two bugs the local test caught, each of which would otherwise have surfaced much later: a `ServerStream` can only be initialized after the server has started, and an unauthorized response must return `liberrors.ErrServerAuth{}` — without it, gortsplib sends no challenge and even the correct password fails.
+
+**So the iOS "write an RTSP server from scratch" job can be deleted from the plan.** The remaining decision — whether Android also uses this core, or RootEncoder's own server — is the user's.
 
 ## 8. Rules worth keeping whatever we build
 
