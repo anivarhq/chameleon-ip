@@ -1,0 +1,93 @@
+name: core
+
+on:
+  push:
+    branches: [main]
+    paths: ["core/**", ".github/workflows/core.yml"]
+  pull_request:
+    paths: ["core/**", ".github/workflows/core.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - run: go vet ./...
+        working-directory: core
+      - run: go test ./... -count=1
+        working-directory: core
+
+  # The point of the spike: does the core build for Android through gomobile,
+  # and is the result 16 KB page-aligned? Go does NOT align to 16 KB by
+  # default, and Google Play has required it since November 2025 — the Go
+  # issue was closed "not planned" twice, so the link flag below and this
+  # check are permanent, not a workaround we can drop later.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1.6.0
+        id: ndk
+        with:
+          ndk-version: r28c
+
+      - name: gomobile bind (aar)
+        working-directory: core
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          gomobile bind -v -target=android/arm64 \
+            -ldflags="-s -w -extldflags=-Wl,-z,max-page-size=16384" \
+            -o chameleon.aar ./mobile
+
+      - name: check 16 KB alignment
+        working-directory: core
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          unzip -o -q chameleon.aar -d aar_out
+          readelf="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          fail=0
+          for so in $(find aar_out -name '*.so'); do
+            align=$("$readelf" -l "$so" | awk '/LOAD/ {print $NF; exit}')
+            echo "$so -> $align"
+            case "$align" in 0x4000|0x10000) ;; *) echo "::error::$so is not 16 KB aligned ($align)"; fail=1 ;; esac
+          done
+          exit $fail
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chameleon-aar
+          path: core/chameleon.aar
+
+  apple:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - name: gomobile bind (xcframework)
+        working-directory: core
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          gomobile bind -v -target=ios,iossimulator,macos \
+            -o Chameleon.xcframework ./mobile
+          ls -R Chameleon.xcframework | head -30
