@@ -1,0 +1,50 @@
+name: android
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", "core/**", "scripts/build-core.sh", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["android/**", "core/**", "scripts/build-core.sh", ".github/workflows/android.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1.6.0
+        id: ndk
+        with:
+          ndk-version: r28c
+
+      - name: build the shared core
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: ./scripts/build-core.sh
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: "9.2.0"
+
+      - name: assemble
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chameleon-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk

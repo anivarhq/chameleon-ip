@@ -1,0 +1,7 @@
+android/app/libs/*.aar
+android/.gradle/
+android/build/
+android/app/build/
+core/*.aar
+core/*.xcframework/
+.DS_Store

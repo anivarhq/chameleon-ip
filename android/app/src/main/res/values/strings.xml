@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Chameleon IP</string>
+    <string name="start">Start camera</string>
+    <string name="stop">Stop</string>
+    <string name="idle">Not streaming</string>
+    <string name="streaming">Streaming</string>
+    <string name="waiting">Waiting for a viewer</string>
+    <string name="needs_camera">Chameleon needs the camera to work.</string>
+    <string name="rtsp_url">Add this to your NVR:\nrtsp://%1$s:%2$s@%3$s:%4$d/main</string>
+    <plurals name="watching">
+        <item quantity="one">%d watching</item>
+        <item quantity="other">%d watching</item>
+    </plurals>
+</resources>
