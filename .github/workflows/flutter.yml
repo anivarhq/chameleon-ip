@@ -58,6 +58,10 @@ jobs:
         working-directory: flutter
         run: flutter analyze --no-fatal-infos
 
+      - name: test
+        working-directory: flutter
+        run: flutter test
+
       - name: build
         working-directory: flutter
         run: flutter build ${{ matrix.platform }} --release
