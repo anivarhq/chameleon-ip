@@ -35,7 +35,8 @@ That decision was made with evidence, not taste: the research is in [docs/resear
 - **RTSP on port 8554.** H.264, 1280×720 at 15 fps, about 2 Mbps, a keyframe every 2 s. Digest authentication.
 - **ONVIF on port 8000**, plus discovery, so NVRs find it and read its real resolution and frame rate.
 - **A username and password generated on the device.** Nothing is served without them. They live in the Android keystore, the Apple keychain, or a DPAPI-sealed file on Windows.
-- **Your network only.** No cloud, no account, and only private addresses are accepted.
+- **Your network only.** Connections are refused before any protocol runs unless they come from a private address, link-local, or a Tailscale one. A phone usually holds a globally routable IPv6 address, so without that rule the camera would answer the internet.
+- **Password guessing is slowed per address**, and never by locking the account — locking one is how a camera locks out its own NVR. An address that authenticated in the last day is never blocked.
 
 It encodes only while someone is connected, gives each new viewer a keyframe immediately, and stamps frames with the time they were captured, so recordings don't drift.
 
@@ -58,7 +59,7 @@ chameleon -rotate-password
 - **iOS needs Apple's multicast entitlement** before NVRs can discover it automatically; until then, add it by address.
 - **Windows already runs its own discovery service** on the same port, so a Windows desktop camera answers direct probes but not broadcast ones. Anivar sends direct probes; other NVRs may need the address typed.
 - **Android cannot restart itself after a reboot** (Android 15 and later). Tap the notification to resume.
-- **A webcam's own limits apply.** The test machine's built-in camera only offers raw formats at 720p, so it delivers about 11 fps, not 15.
+- **A webcam's own limits apply.** Frame rate depends on what the camera offers at the chosen resolution, and many built-in cameras drop their rate in low light.
 - **Audio is not wired up yet**, though the core is ready for it.
 
 ## Layout
