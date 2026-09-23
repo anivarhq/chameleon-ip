@@ -1,0 +1,88 @@
+name: flutter
+
+on:
+  push:
+    branches: [main]
+    paths: ["flutter/**", "core/**", ".github/workflows/flutter.yml"]
+  pull_request:
+    paths: ["flutter/**", "core/**", ".github/workflows/flutter.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, platform: windows, engine: chameleon.exe }
+          - { os: ubuntu-latest, platform: linux, engine: chameleon }
+          - { os: macos-latest, platform: macos, engine: chameleon }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: build the engine
+        working-directory: core
+        env:
+          CGO_ENABLED: "0"
+        run: go build -trimpath -ldflags="-s -w" -o "../flutter/${{ matrix.engine }}" ./cmd/chameleon
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          cache: true
+
+      - name: Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev
+
+      # The platform folders are generated rather than committed: they are
+      # Flutter's own scaffolding, they change with every SDK release, and
+      # nothing of ours lives in them.
+      - name: prepare the project
+        working-directory: flutter
+        run: |
+          flutter create --project-name chameleon_ip --platforms=${{ matrix.platform }} .
+          flutter pub get
+
+      - name: analyze
+        working-directory: flutter
+        run: flutter analyze --no-fatal-infos
+
+      - name: build
+        working-directory: flutter
+        run: flutter build ${{ matrix.platform }} --release
+
+      # The engine ships beside the app, which is where it looks for it.
+      - name: bundle the engine (windows)
+        if: matrix.platform == 'windows'
+        working-directory: flutter
+        run: copy chameleon.exe build\windows\x64\runner\Release\
+
+      - name: bundle the engine (linux)
+        if: matrix.platform == 'linux'
+        working-directory: flutter
+        run: cp chameleon build/linux/x64/release/bundle/
+
+      - name: bundle the engine (macos)
+        if: matrix.platform == 'macos'
+        working-directory: flutter
+        run: cp chameleon "build/macos/Build/Products/Release/chameleon_ip.app/Contents/MacOS/"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chameleon-app-${{ matrix.platform }}
+          path: |
+            flutter/build/windows/x64/runner/Release/
+            flutter/build/linux/x64/release/bundle/
+            flutter/build/macos/Build/Products/Release/chameleon_ip.app
+          if-no-files-found: error

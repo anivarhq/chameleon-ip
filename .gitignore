@@ -5,3 +5,17 @@ android/app/build/
 core/*.aar
 core/*.xcframework/
 .DS_Store
+flutter/build/
+flutter/.dart_tool/
+flutter/windows/
+flutter/linux/
+flutter/macos/
+flutter/android/
+flutter/ios/
+flutter/web/
+flutter/chameleon
+flutter/chameleon.exe
+flutter/.flutter-plugins*
+flutter/pubspec.lock
+apple/Frameworks/
+apple/*.xcodeproj
