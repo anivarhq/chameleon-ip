@@ -2,8 +2,11 @@ package core
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/bluenviron/gortsplib/v5"
 )
 
 // A camera runs for weeks. RTP timestamps are 32 bits at 90 kHz, so they wrap
@@ -71,4 +74,49 @@ func TestConfigReadsEveryKeyTheAppsSend(t *testing.T) {
 	if cfg != want {
 		t.Errorf("config = %+v\nwant     %+v", cfg, want)
 	}
+}
+
+// Apple's VideoToolbox calls its output handler on a thread of its choosing,
+// and Android's MediaCodec callback runs on its own handler thread. If two
+// frames ever arrive at once, the RTP encoder must not be shared unguarded —
+// this is the test that says so, and it is meant to be run with -race.
+func TestPushIsSafeFromSeveralThreads(t *testing.T) {
+	cam := New(Config{
+		Address: "127.0.0.1:0", ONVIFAddress: "127.0.0.1:0",
+		User: "admin", Pass: "test1234",
+	})
+	cam.cfg.Address = "127.0.0.1:" + freePort(t)
+	cam.cfg.ONVIFAddress = "127.0.0.1:" + freePort(t)
+	if err := cam.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer cam.Stop()
+
+	sps := []byte{0x67, 0x42, 0x00, 0x1f}
+	pps := []byte{0x68, 0xce, 0x38, 0x80}
+	frame := [][]byte{sps, pps, {0x65, 0x01, 0x02, 0x03}}
+
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				_ = cam.PushAU(frame, time.Duration(i)*time.Millisecond)
+			}
+		}(worker)
+	}
+	// And viewers coming and going at the same time, which is the other half
+	// of the shared state.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			cam.OnPlay(&gortsplib.ServerHandlerOnPlayCtx{})
+			cam.OnSessionClose(&gortsplib.ServerHandlerOnSessionCloseCtx{})
+			_ = cam.Viewers()
+			_ = cam.Notes()
+		}
+	}()
+	wg.Wait()
 }

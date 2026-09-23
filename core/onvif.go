@@ -52,9 +52,15 @@ func (o *onvifServer) start(address string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc(DeviceServicePath, o.handle)
 	o.http = &http.Server{
-		Addr:              address,
-		Handler:           mux,
+		Addr:    address,
+		Handler: mux,
+		// A connection that sends its request one byte a minute would
+		// otherwise hold a goroutine forever, and anyone on the network can
+		// open one.
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       20 * time.Second,
+		WriteTimeout:      20 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	ln, err := net.Listen("tcp", address)
 	if err != nil {

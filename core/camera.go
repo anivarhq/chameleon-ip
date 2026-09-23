@@ -290,9 +290,11 @@ func (c *Camera) PushAU(au [][]byte, pts time.Duration) error {
 		stream.ReloadDesc()
 	}
 	au = prepareAU(au, c.sps, c.pps)
-	c.mu.Unlock()
-
+	// The RTP encoder carries sequence numbers and its own state, so it is
+	// used under the lock: VideoToolbox calls its output handler on a thread
+	// of its choosing, and two frames arriving at once would corrupt both.
 	pkts, err := c.enc.Encode(au)
+	c.mu.Unlock()
 	if err != nil {
 		return err
 	}
