@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -43,6 +45,7 @@ class CameraPage extends StatefulWidget {
 
 class _CameraPageState extends State<CameraPage> {
   late final CameraEngine _engine = widget.engine ?? Engine();
+  StreamSubscription<Status>? _updates;
   Status _status = const Status();
   List<String> _cameras = const [];
   String? _chosen;
@@ -50,18 +53,31 @@ class _CameraPageState extends State<CameraPage> {
   @override
   void initState() {
     super.initState();
-    _engine.statuses.listen((status) => setState(() => _status = status));
+    _updates = _engine.statuses.listen((status) {
+      if (mounted) setState(() => _status = status);
+    });
     _loadCameras();
+  }
+
+  @override
+  void dispose() {
+    // Without this the window keeps listening after it is gone, and the next
+    // status from the engine lands on a dead widget.
+    _updates?.cancel();
+    _engine.stop();
+    super.dispose();
   }
 
   Future<void> _loadCameras() async {
     try {
       final cameras = await _engine.cameras();
+      if (!mounted) return;
       setState(() {
         _cameras = cameras;
         _chosen ??= cameras.isEmpty ? null : cameras.first;
       });
     } catch (error) {
+      if (!mounted) return;
       setState(() => _status = Status(error: 'Could not find the engine: $error'));
     }
   }

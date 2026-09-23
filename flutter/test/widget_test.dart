@@ -32,11 +32,35 @@ class FakeEngine implements CameraEngine {
   @override
   Future<void> stop() async {
     stopped = true;
-    _controller.add(const Status());
+    if (!_controller.isClosed) _controller.add(const Status());
   }
+
+  /// Lets the test push a status as if the engine had sent one.
+  void emit(Status status) => _controller.add(status);
+
+  bool get hasListeners => _controller.hasListener;
 }
 
 void main() {
+  testWidgets('lets go of the engine when the window closes', (tester) async {
+    final engine = FakeEngine();
+    await tester.pumpWidget(ChameleonApp(engine: engine));
+    await tester.pumpAndSettle();
+    expect(engine.hasListeners, isTrue);
+
+    // Replace the window with something else, as closing it does.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+
+    expect(engine.hasListeners, isFalse, reason: 'still listening after the window went away');
+    expect(engine.stopped, isTrue, reason: 'the engine was left running with the camera on');
+
+    // A late status must not reach the dead widget; without the cancel this
+    // throws "setState() called after dispose()".
+    engine.emit(const Status(running: true, viewers: 1));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('opens idle and offers the cameras it found', (tester) async {
     final engine = FakeEngine();
     await tester.pumpWidget(ChameleonApp(engine: engine));

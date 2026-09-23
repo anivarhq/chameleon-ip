@@ -60,9 +60,18 @@ func Capture(ctx context.Context, cam *core.Camera, o Options) error {
 	}
 	defer func() { _ = cmd.Process.Kill() }()
 
+	// Tie ffmpeg's life to ours, so a hard kill cannot leave it running with
+	// the camera light on.
+	release, err := superviseChild(cmd)
+	if err != nil {
+		// Worth knowing, not worth refusing to stream over.
+		cam.Note("child supervision", err)
+	}
+	defer release()
+
 	// ffmpeg cannot be asked for a keyframe on demand, so a viewer joining
 	// mid-GOP waits for the next one; the 2 s interval bounds that wait.
-	reader := bufio.NewReaderSize(stdout, 1<<20)
+	scanner := &nalScanner{r: bufio.NewReaderSize(stdout, 1<<20)}
 
 	// ffmpeg's raw H.264 output carries no timestamps, so each frame is
 	// stamped with the time it arrived. Counting frames against the
@@ -71,7 +80,7 @@ func Capture(ctx context.Context, cam *core.Camera, o Options) error {
 	// is six minutes of drift an hour in an NVR's recording.
 	start := time.Now()
 	for {
-		au, err := readAccessUnit(reader)
+		au, err := readAccessUnit(scanner)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -114,82 +123,75 @@ func (o Options) args() []string {
 
 func (o Options) size() string { return fmt.Sprintf("%dx%d", o.Width, o.Height) }
 
+// nalScanner splits an Annex-B stream into NAL units.
+//
+// It carries its own state rather than pushing bytes back into the reader:
+// bufio can unread exactly one byte and a start code is three or four, so the
+// obvious version silently skipped to the next start code and dropped every
+// other NAL unit. That halved the frame rate and looked like a slow webcam.
+type nalScanner struct {
+	r       *bufio.Reader
+	current []byte
+	inNALU  bool
+}
+
+// next returns the next NAL unit, without its start code.
+//
+// Zero bytes immediately before a start code are treated as part of it. The
+// H.264 syntax allows both readings, and a decoder ignores trailing zeros.
+func (s *nalScanner) next() ([]byte, error) {
+	zeros := 0
+	for {
+		b, err := s.r.ReadByte()
+		if err != nil {
+			if s.inNALU && len(s.current) > 0 {
+				out := s.current
+				s.current, s.inNALU = nil, false
+				return out, nil
+			}
+			return nil, err
+		}
+
+		switch {
+		case b == 0:
+			zeros++
+
+		case b == 1 && zeros >= 2:
+			// A start code: whatever came before it is a complete NAL unit.
+			out := s.current
+			s.current, s.inNALU = nil, true
+			zeros = 0
+			if len(out) > 0 {
+				return out, nil
+			}
+
+		default:
+			if s.inNALU {
+				for i := 0; i < zeros; i++ {
+					s.current = append(s.current, 0)
+				}
+				s.current = append(s.current, b)
+			}
+			zeros = 0
+		}
+	}
+}
+
 // readAccessUnit reads NAL units until the next frame starts.
-func readAccessUnit(r *bufio.Reader) ([][]byte, error) {
+func readAccessUnit(s *nalScanner) ([][]byte, error) {
 	var au [][]byte
 	for {
-		nalu, err := readNALU(r)
+		nalu, err := s.next()
 		if err != nil {
 			return nil, err
 		}
 		au = append(au, nalu)
-		// A slice ends the frame; anything after it belongs to the next one.
+		// A coded slice ends the frame; anything after it starts the next.
 		if t := nalu[0] & 0x1F; t >= 1 && t <= 5 {
 			return au, nil
 		}
 		if len(au) > 64 {
-			return au, nil // malformed stream; don't grow without bound
-		}
-	}
-}
-
-// readNALU reads one start-code-delimited NAL unit.
-func readNALU(r *bufio.Reader) ([]byte, error) {
-	// Skip to the first start code.
-	if err := skipStartCode(r); err != nil {
-		return nil, err
-	}
-	var out []byte
-	zeros := 0
-	for {
-		b, err := r.ReadByte()
-		if err != nil {
-			if len(out) > 0 {
-				return out, nil
-			}
-			return nil, err
-		}
-		if b == 0 {
-			zeros++
-			continue
-		}
-		if b == 1 && zeros >= 2 {
-			// Next start code: give back the bytes before it, minus the
-			// zeros that belong to the start code.
-			if err := r.UnreadByte(); err != nil {
-				return nil, err
-			}
-			for i := 0; i < zeros; i++ {
-				_ = r.UnreadByte()
-			}
-			_ = r.UnreadByte()
-			if len(out) > 0 {
-				return out, nil
-			}
-			return nil, fmt.Errorf("empty NAL unit")
-		}
-		for i := 0; i < zeros; i++ {
-			out = append(out, 0)
-		}
-		zeros = 0
-		out = append(out, b)
-	}
-}
-
-func skipStartCode(r *bufio.Reader) error {
-	zeros := 0
-	for {
-		b, err := r.ReadByte()
-		if err != nil {
-			return err
-		}
-		switch {
-		case b == 0:
-			zeros++
-		case b == 1 && zeros >= 2:
-			return nil
-		default:
-			zeros = 0
+			return au, nil // malformed stream; do not grow without bound
 		}
 	}
 }

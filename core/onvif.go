@@ -22,12 +22,12 @@ const DeviceServicePath = "/onvif/device_service"
 // reads the clock first so it can build a password digest that isn't rejected
 // as stale, and reads capabilities to find out what else to ask for.
 var preAuth = map[string]bool{
-	"GetSystemDateAndTime":  true,
-	"GetCapabilities":       true,
-	"GetServices":           true,
+	"GetSystemDateAndTime":   true,
+	"GetCapabilities":        true,
+	"GetServices":            true,
 	"GetServiceCapabilities": true,
-	"GetWsdlUrl":            true,
-	"GetEndpointReference":  true,
+	"GetWsdlUrl":             true,
+	"GetEndpointReference":   true,
 	// GetUsers is deliberately NOT here: leaving it open leaks the account
 	// list, as onvif_simple_server does.
 }
@@ -60,6 +60,7 @@ func (o *onvifServer) start(address string) error {
 	if err != nil {
 		return err
 	}
+	ln = localOnlyListener{ln}
 	go func() { _ = o.http.Serve(ln) }()
 	return nil
 }
@@ -87,13 +88,26 @@ func (o *onvifServer) handle(w http.ResponseWriter, r *http.Request) {
 		op = m[1]
 	}
 
+	now := time.Now()
+	if !preAuth[op] && o.cam.guard.blocked(remote(r), now) {
+		w.Header().Set("Content-Type", "application/soap+xml; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, fault("ter:NotAuthorized", "Too many failed attempts"))
+		return
+	}
+
 	if !preAuth[op] && !o.authenticated(body) {
+		o.cam.guard.failed(remote(r), now)
 		// 400 with a fault, which is what ONVIF devices send for a failed
 		// UsernameToken; clients read the fault, not the status code.
 		w.Header().Set("Content-Type", "application/soap+xml; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, fault("ter:NotAuthorized", "The action requires authorization"))
 		return
+	}
+
+	if !preAuth[op] {
+		o.cam.guard.succeeded(remote(r), now)
 	}
 
 	host := r.Host
@@ -296,6 +310,14 @@ func (o *onvifServer) seenNonce(nonce string, when time.Time) bool {
 	o.nonces[nonce] = when
 	return false
 }
+
+// remote is the address a request came from, for the throttle.
+type addrString string
+
+func (a addrString) Network() string { return "tcp" }
+func (a addrString) String() string  { return string(a) }
+
+func remote(r *http.Request) net.Addr { return addrString(r.RemoteAddr) }
 
 // tagValue returns the text of the first element with this local name,
 // whatever namespace prefix it carries.

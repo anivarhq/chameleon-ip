@@ -21,8 +21,36 @@ jobs:
           cache-dependency-path: core/go.sum
       - run: go vet ./...
         working-directory: core
-      - run: go test ./... -count=1
+
+      # Formatting drifts the moment a file is edited by anything but gofmt.
+      - name: gofmt
         working-directory: core
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt'd: $unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      # The camera is pushed frames from one thread while viewers connect and
+      # disconnect on others, which is exactly where races hide. The detector
+      # needs cgo, so it runs here rather than on a developer's Windows box.
+      - name: test with the race detector
+        working-directory: core
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race ./... -count=1
+
+      # Every platform the core is built for, compiled on every change.
+      - name: cross-compile
+        working-directory: core
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for target in windows/amd64 darwin/arm64 linux/amd64 android/arm64 ios/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/} go build ./... || exit 1
+          done
 
   # The point of the spike: does the core build for Android through gomobile,
   # and is the result 16 KB page-aligned? Go does NOT align to 16 KB by

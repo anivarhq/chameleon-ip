@@ -8,9 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import androidx.core.app.ServiceCompat
 import android.util.Log
 import mobile.Mobile
 import org.json.JSONObject
@@ -26,32 +26,45 @@ import org.json.JSONObject
  */
 class CameraService : Service() {
     private var pipeline: CameraPipeline? = null
-    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (pipeline != null) return START_STICKY
+        if (pipeline != null) return START_NOT_STICKY
 
-        startForeground(
-            NOTIFICATION_ID,
-            notification(getString(R.string.streaming)),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA,
+        // The typed foreground call is API 29 and the camera type itself is
+        // API 30, so the compat helper does the version dance; calling the
+        // three-argument form directly crashes older phones, which are the
+        // ones most likely to be repurposed as cameras.
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        } else {
+            0
+        }
+        ServiceCompat.startForeground(
+            this, NOTIFICATION_ID, notification(getString(R.string.streaming)), type,
         )
 
-        // Wi-Fi must not doze off while the screen is dark, or viewers stall.
-        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        @Suppress("DEPRECATION")
-        wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "chameleon").apply {
-            setReferenceCounted(false)
-            acquire()
-        }
+        // No Wi-Fi lock: the only mode that still does anything needs the
+        // screen on, which is exactly when it is not needed, and a running
+        // foreground service already keeps the app out of App Standby.
 
         val config = JSONObject()
             .put("address", ":$PORT")
+            .put("onvif_address", ":$ONVIF_PORT")
             .put("path", "main")
             .put("user", Credentials.USER)
             .put("pass", Credentials.password(this))
+            .put("uuid", Credentials.deviceUuid(this))
+            .put("name", Build.MODEL ?: "Android camera")
+            .put("model", "${Build.MANUFACTURER} ${Build.MODEL}")
+            .put("serial", Credentials.deviceUuid(this).takeLast(12))
+            // What the encoder is really doing: an NVR that reads a made-up
+            // frame rate makes its own decisions on it.
+            .put("width", CameraPipeline.WIDTH)
+            .put("height", CameraPipeline.HEIGHT)
+            .put("fps", CameraPipeline.FPS)
+            .put("bitrate", CameraPipeline.BITRATE)
         try {
             Mobile.start(config.toString())
             pipeline = CameraPipeline(this).also {
@@ -63,13 +76,15 @@ class CameraService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        return START_STICKY
+        // Not sticky: Android would restart this service with the app in the
+        // background, and a camera service started from the background is
+        // refused outright from Android 14. The user taps the notification.
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         pipeline?.stop(); pipeline = null
         runCatching { Mobile.stop() }
-        wifiLock?.let { if (it.isHeld) it.release() }; wifiLock = null
         super.onDestroy()
     }
 
@@ -95,6 +110,7 @@ class CameraService : Service() {
 
     companion object {
         const val PORT = 8554
+        const val ONVIF_PORT = 8000
         private const val CHANNEL = "chameleon"
         private const val NOTIFICATION_ID = 1
         private const val TAG = "ChameleonService"
@@ -107,8 +123,20 @@ class CameraService : Service() {
     }
 }
 
-/** Where the activity parks its preview surface for the service to draw on. */
+/**
+ * Where the activity parks its preview surface for the service to draw on.
+ *
+ * Setting it tells a running pipeline to rebuild its capture session, because
+ * a surface that has been released cannot stay in the session's target list.
+ */
 object Preview {
     @Volatile
+    var onChange: ((android.view.Surface?) -> Unit)? = null
+
+    @Volatile
     var surface: android.view.Surface? = null
+        set(value) {
+            field = value
+            onChange?.invoke(value)
+        }
 }

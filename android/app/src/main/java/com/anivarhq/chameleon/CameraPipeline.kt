@@ -29,10 +29,10 @@ import java.nio.ByteBuffer
  */
 class CameraPipeline(
     private val context: Context,
-    private val width: Int = 1280,
-    private val height: Int = 720,
-    private val fps: Int = 15,
-    private val bitrate: Int = 2_000_000,
+    private val width: Int = WIDTH,
+    private val height: Int = HEIGHT,
+    private val fps: Int = FPS,
+    private val bitrate: Int = BITRATE,
 ) {
     private var camera: CameraDevice? = null
     private var session: CameraCaptureSession? = null
@@ -43,6 +43,29 @@ class CameraPipeline(
 
     /** Set to the preview surface to also show what the camera sees. */
     var previewSurface: Surface? = null
+
+    /**
+     * Swaps the preview in or out while streaming.
+     *
+     * When the activity goes away its surface is released, and a capture
+     * session still pointing at it stops delivering frames — the stream dies
+     * quietly with the service still running and the notification still up.
+     * So the session is rebuilt around whatever surfaces are currently alive;
+     * the encoder's own surface never goes anywhere.
+     */
+    fun updatePreview(surface: Surface?) {
+        handler?.post {
+            previewSurface = surface
+            val device = camera ?: return@post
+            runCatching {
+                session?.stopRepeating()
+                session?.abortCaptures()
+            }
+            session?.close()
+            session = null
+            createSession(device)
+        }
+    }
 
     private var epochNanos = 0L
 
@@ -57,9 +80,13 @@ class CameraPipeline(
 
         startEncoder()
         openCamera()
+
+        // The activity hands its preview over as it comes and goes.
+        Preview.onChange = { updatePreview(it) }
     }
 
     fun stop() {
+        Preview.onChange = null
         session?.close(); session = null
         camera?.close(); camera = null
         encoder?.let { runCatching { it.stop() }; it.release() }; encoder = null
@@ -170,7 +197,14 @@ class CameraPipeline(
         }, handler)
     }
 
-    private companion object {
-        const val TAG = "ChameleonCamera"
+    companion object {
+        // What the encoder is set to do. The service reports these to NVRs
+        // over ONVIF, so they have to be the same numbers.
+        const val WIDTH = 1280
+        const val HEIGHT = 720
+        const val FPS = 15
+        const val BITRATE = 2_000_000
+
+        private const val TAG = "ChameleonCamera"
     }
 }

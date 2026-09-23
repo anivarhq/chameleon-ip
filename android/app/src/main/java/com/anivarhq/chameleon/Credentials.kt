@@ -30,6 +30,7 @@ object Credentials {
 
     private const val PREFS = "chameleon"
     private const val KEY_PASS = "pass"
+    private const val KEY_UUID = "uuid"
     private const val KEYSTORE_ALIAS = "chameleon-credentials"
     private const val TRANSFORM = "AES/GCM/NoPadding"
     private const val IV_BYTES = 12
@@ -45,6 +46,19 @@ object Credentials {
         }
         val fresh = generate()
         prefs.edit().putString(KEY_PASS, encrypt(fresh)).apply()
+        return fresh
+    }
+
+    /**
+     * The identity NVRs key this camera on. UniFi Protect and Home Assistant
+     * match cameras by it, so a fresh one on every launch would look like a
+     * fresh camera on every launch.
+     */
+    fun deviceUuid(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.getString(KEY_UUID, null)?.let { return it }
+        val fresh = "urn:uuid:" + java.util.UUID.randomUUID()
+        prefs.edit().putString(KEY_UUID, fresh).apply()
         return fresh
     }
 

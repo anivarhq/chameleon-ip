@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"net"
+
 	"github.com/google/uuid"
 
 	"github.com/bluenviron/gortsplib/v5"
@@ -31,25 +33,28 @@ const Version = "0.1.0"
 type Config struct {
 	// Address to listen on, e.g. ":8554". 8554 and not 554, because phones
 	// cannot bind ports below 1024.
-	Address string
+	Address string `json:"address"`
 	// ONVIFAddress is where the ONVIF service listens, e.g. ":8000".
-	ONVIFAddress string
+	ONVIFAddress string `json:"onvif_address"`
 	// Stream path, e.g. "main" for rtsp://user:pass@host:8554/main.
-	Path string
-	User string
-	Pass string
+	Path string `json:"path"`
+	User string `json:"user"`
+	Pass string `json:"pass"`
 
 	// Identity. NVRs key cameras on these, so UUID and Serial must be stored
 	// by the app and survive restarts, or a reconnecting camera looks new.
-	UUID   string // "urn:uuid:…"
-	Name   string // what the owner calls it, e.g. "Back door"
-	Model  string // the device, e.g. "Pixel 4a"
-	Serial string
+	UUID   string `json:"uuid"`  // "urn:uuid:…"
+	Name   string `json:"name"`  // what the owner calls it, e.g. "Back door"
+	Model  string `json:"model"` // the device, e.g. "Pixel 4a"
+	Serial string `json:"serial"`
 
 	// What the encoder is actually doing. Reported over ONVIF, and it has to
 	// be the truth: UniFi Protect refuses a camera whose rate control is
 	// empty, and wrong numbers mislead every NVR that reads them.
-	Width, Height, FPS, Bitrate int
+	Width   int `json:"width"`
+	Height  int `json:"height"`
+	FPS     int `json:"fps"`
+	Bitrate int `json:"bitrate"`
 }
 
 func (c *Config) applyDefaults() {
@@ -112,12 +117,13 @@ type Camera struct {
 	onvif     *onvifServer
 	discovery *discovery
 	notes     map[string]string
+	guard     *throttle
 }
 
 // New prepares a camera. Nothing listens until Start.
 func New(cfg Config) *Camera {
 	cfg.applyDefaults()
-	return &Camera{cfg: cfg}
+	return &Camera{cfg: cfg, guard: newThrottle()}
 }
 
 // Start begins listening. It returns once the port is open.
@@ -145,6 +151,16 @@ func (c *Camera) Start() error {
 		// readable form, and no NVR client supports Digest SHA-256 — it
 		// stops ffmpeg authenticating at all.
 		AuthMethods: []auth.VerifyMethod{auth.VerifyMethodDigestMD5},
+		// Only the local network may even open a connection. A phone often
+		// holds a globally routable IPv6 address, and an exposed camera is
+		// how tens of thousands of them ended up on Shodan.
+		Listen: func(network, address string) (net.Listener, error) {
+			ln, err := net.Listen(network, address)
+			if err != nil {
+				return nil, err
+			}
+			return localOnlyListener{ln}, nil
+		},
 	}
 
 	// The listener comes up first: a ServerStream can only be initialized
@@ -184,6 +200,10 @@ func (c *Camera) Start() error {
 	return nil
 }
 
+// Note records a non-fatal problem for the app to show. Platform code uses it
+// for limitations it hits at runtime.
+func (c *Camera) Note(what string, err error) { c.note(what, err) }
+
 // note records a non-fatal startup problem for the app to show.
 func (c *Camera) note(what string, err error) {
 	c.mu.Lock()
@@ -216,19 +236,24 @@ func (c *Camera) ready() *gortsplib.ServerStream {
 
 // Stop closes the ports, says goodbye over discovery, and drops every viewer.
 func (c *Camera) Stop() {
-	if c.discovery != nil {
-		c.discovery.close()
-		c.discovery = nil
+	c.mu.Lock()
+	discovery, onvif, srv, stream := c.discovery, c.onvif, c.srv, c.stream
+	c.discovery, c.onvif, c.srv, c.stream = nil, nil, nil, nil
+	c.mu.Unlock()
+
+	// Outside the lock: closing a server waits for its handlers, and those
+	// handlers take this lock.
+	if discovery != nil {
+		discovery.close()
 	}
-	if c.onvif != nil {
-		c.onvif.stop()
-		c.onvif = nil
+	if onvif != nil {
+		onvif.stop()
 	}
-	if c.srv != nil {
-		c.srv.Close()
+	if srv != nil {
+		srv.Close()
 	}
-	if c.stream != nil {
-		c.stream.Close()
+	if stream != nil {
+		stream.Close()
 	}
 }
 
@@ -273,7 +298,7 @@ func (c *Camera) PushAU(au [][]byte, pts time.Duration) error {
 	}
 	// Timestamps run from one epoch and never restart, even if the encoder
 	// is torn down and rebuilt. A reset makes recorders stall at the seam.
-	ts := uint32(pts.Seconds() * 90000)
+	ts := rtpTimestamp(pts)
 	ntp := c.epoch.Add(pts)
 	for _, pkt := range pkts {
 		pkt.Timestamp = ts
@@ -284,10 +309,41 @@ func (c *Camera) PushAU(au [][]byte, pts time.Duration) error {
 	return nil
 }
 
+// rtpTimestamp converts a capture time to RTP's 90 kHz clock.
+//
+// The arithmetic stays in integers and the truncation to 32 bits is what
+// makes it wrap, which is how RTP is meant to behave. Going through a float
+// instead looked fine for half a day and then went undefined: past roughly
+// 13 hours 15 minutes the value no longer fits a uint32, and a camera runs
+// for weeks.
+func rtpTimestamp(pts time.Duration) uint32 {
+	if pts < 0 {
+		return 0
+	}
+	// Seconds and remainder are converted separately: nanoseconds times
+	// 90000 passes what a uint64 can hold after about five hours.
+	seconds := uint64(pts / time.Second)
+	remainder := uint64(pts % time.Second)
+	return uint32(seconds*90000 + remainder*90000/uint64(time.Second))
+}
+
 // --- gortsplib handlers ---
 
 func (c *Camera) authorized(conn *gortsplib.ServerConn, req *base.Request) bool {
-	return conn.VerifyCredentials(req, c.cfg.User, c.cfg.Pass)
+	addr := conn.NetConn().RemoteAddr()
+	now := time.Now()
+	if c.guard.blocked(addr, now) {
+		return false
+	}
+	ok := conn.VerifyCredentials(req, c.cfg.User, c.cfg.Pass)
+	// Only a wrong password counts. The first request of a session carries
+	// none by design, and gortsplib answers that with a challenge.
+	if ok {
+		c.guard.succeeded(addr, now)
+	} else if req.Header["Authorization"] != nil {
+		c.guard.failed(addr, now)
+	}
+	return ok
 }
 
 func (c *Camera) OnDescribe(ctx *gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {

@@ -80,8 +80,12 @@ func (d *discovery) start() error {
 		}
 	}
 	if joined == 0 {
-		_ = conn.Close()
-		return fmt.Errorf("could not join %s on any interface", discoveryGroup)
+		// iOS refuses multicast without Apple's entitlement, and that is
+		// exactly the case the unicast fallback exists for: an NVR probing
+		// each address one by one still gets an answer. Keep the socket and
+		// say what was lost.
+		d.cam.note("discovery", fmt.Errorf(
+			"no multicast on any interface; answering direct probes only"))
 	}
 
 	d.mu.Lock()
