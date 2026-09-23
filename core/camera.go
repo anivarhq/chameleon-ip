@@ -8,8 +8,12 @@ package core
 import (
 	"bytes"
 	"errors"
+	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/auth"
@@ -20,15 +24,70 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/liberrors"
 )
 
+// Version is reported to NVRs as the firmware version.
+const Version = "0.1.0"
+
 // Config is how a platform app sets the camera up.
 type Config struct {
 	// Address to listen on, e.g. ":8554". 8554 and not 554, because phones
 	// cannot bind ports below 1024.
 	Address string
+	// ONVIFAddress is where the ONVIF service listens, e.g. ":8000".
+	ONVIFAddress string
 	// Stream path, e.g. "main" for rtsp://user:pass@host:8554/main.
 	Path string
 	User string
 	Pass string
+
+	// Identity. NVRs key cameras on these, so UUID and Serial must be stored
+	// by the app and survive restarts, or a reconnecting camera looks new.
+	UUID   string // "urn:uuid:…"
+	Name   string // what the owner calls it, e.g. "Back door"
+	Model  string // the device, e.g. "Pixel 4a"
+	Serial string
+
+	// What the encoder is actually doing. Reported over ONVIF, and it has to
+	// be the truth: UniFi Protect refuses a camera whose rate control is
+	// empty, and wrong numbers mislead every NVR that reads them.
+	Width, Height, FPS, Bitrate int
+}
+
+func (c *Config) applyDefaults() {
+	if c.Address == "" {
+		c.Address = ":8554"
+	}
+	if c.ONVIFAddress == "" {
+		c.ONVIFAddress = ":8000"
+	}
+	if c.Path == "" {
+		c.Path = "main"
+	}
+	if c.UUID == "" {
+		// Better than nothing, but an NVR will see a new camera after every
+		// restart; apps are expected to store one.
+		c.UUID = "urn:uuid:" + uuid.NewString()
+	}
+	if c.Name == "" {
+		c.Name = "Chameleon"
+	}
+	if c.Model == "" {
+		c.Model = "Chameleon IP"
+	}
+	if c.Serial == "" {
+		c.Serial = strings.TrimPrefix(c.UUID, "urn:uuid:")
+	}
+	if c.Width == 0 {
+		c.Width = 1280
+	}
+	if c.Height == 0 {
+		c.Height = 720
+	}
+	if c.FPS == 0 {
+		c.FPS = 15
+	}
+	if c.Bitrate == 0 {
+		c.Bitrate = 2_000_000
+	}
 }
 
 // Camera serves one video stream over RTSP.
@@ -49,16 +108,15 @@ type Camera struct {
 	sps, pps []byte
 	viewers  int
 	epoch    time.Time
+
+	onvif     *onvifServer
+	discovery *discovery
+	notes     map[string]string
 }
 
 // New prepares a camera. Nothing listens until Start.
 func New(cfg Config) *Camera {
-	if cfg.Address == "" {
-		cfg.Address = ":8554"
-	}
-	if cfg.Path == "" {
-		cfg.Path = "main"
-	}
+	cfg.applyDefaults()
 	return &Camera{cfg: cfg}
 }
 
@@ -107,7 +165,45 @@ func (c *Camera) Start() error {
 	c.stream = stream
 	c.epoch = time.Now()
 	c.mu.Unlock()
+
+	// ONVIF is how NVRs other than Frigate find and configure a camera. If it
+	// cannot listen, the stream still works and can be added by address, so
+	// the failure is recorded rather than fatal.
+	c.onvif = &onvifServer{cam: c}
+	if err := c.onvif.start(c.cfg.ONVIFAddress); err != nil {
+		c.note("onvif", err)
+		c.onvif = nil
+	} else {
+		c.discovery = &discovery{cam: c}
+		if err := c.discovery.start(); err != nil {
+			// Windows keeps its own WS-Discovery service on this port.
+			c.note("discovery", err)
+			c.discovery = nil
+		}
+	}
 	return nil
+}
+
+// note records a non-fatal startup problem for the app to show.
+func (c *Camera) note(what string, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.notes == nil {
+		c.notes = map[string]string{}
+	}
+	c.notes[what] = err.Error()
+}
+
+// Notes reports what started with a limitation, as "what: why" lines.
+func (c *Camera) Notes() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.notes))
+	for what, why := range c.notes {
+		out = append(out, what+": "+why)
+	}
+	sort.Strings(out)
+	return strings.Join(out, "\n")
 }
 
 // ready returns the stream once it can serve; a client that connects in the
@@ -118,8 +214,16 @@ func (c *Camera) ready() *gortsplib.ServerStream {
 	return c.stream
 }
 
-// Stop closes the port and drops every viewer.
+// Stop closes the ports, says goodbye over discovery, and drops every viewer.
 func (c *Camera) Stop() {
+	if c.discovery != nil {
+		c.discovery.close()
+		c.discovery = nil
+	}
+	if c.onvif != nil {
+		c.onvif.stop()
+		c.onvif = nil
+	}
 	if c.srv != nil {
 		c.srv.Close()
 	}
