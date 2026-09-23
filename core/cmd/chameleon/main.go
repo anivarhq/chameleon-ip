@@ -71,7 +71,7 @@ func main() {
 		UUID:         settings.UUID,
 		Name:         settings.Name,
 		Model:        desktop.MachineModel(),
-		Serial:       settings.UUID[len(settings.UUID)-12:],
+		Serial:       lastRunes(settings.UUID, 12),
 		Width:        settings.Width,
 		Height:       settings.Height,
 		FPS:          settings.FPS,
@@ -128,6 +128,15 @@ func main() {
 		}
 		log.Fatalf("capture: %v", err)
 	}
+}
+
+// lastRunes is the tail of a string, or all of it when it is shorter. Slicing
+// blind would panic on a settings file someone had edited.
+func lastRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }
 
 func emit(s desktop.Status) {

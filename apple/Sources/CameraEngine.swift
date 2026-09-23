@@ -67,7 +67,6 @@ final class CameraEngine: NSObject, ObservableObject {
             return
         }
         session.startRunning()
-        started = CACurrentMediaTime()
         DispatchQueue.main.async {
             self.isRunning = true
             // The core knows who is connected; the screen just repeats it.
@@ -201,6 +200,12 @@ extension CameraEngine: AVCaptureVideoDataOutputSampleBufferDelegate {
     /// keyframe so a viewer joining between them can decode.
     private func push(_ sample: CMSampleBuffer, at time: CMTime) {
         guard let block = CMSampleBufferGetDataBuffer(sample) else { return }
+
+        // The clock starts at the first frame that actually comes out of the
+        // encoder, not when the session was told to run. Taking it from the
+        // session start left the first frames stamped with the time since the
+        // device booted, and then jumping backwards.
+        if started == 0 { started = CMTimeGetSeconds(time) }
 
         var annexB = Data()
         let isKeyframe = Self.isKeyframe(sample)

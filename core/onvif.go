@@ -32,6 +32,10 @@ var preAuth = map[string]bool{
 	// list, as onvif_simple_server does.
 }
 
+// How far a token's timestamp may be from our clock, which is also how long a
+// nonce is worth remembering. Five minutes is what gSOAP-based cameras allow.
+const nonceWindow = 5 * time.Minute
+
 var bodyFirstChild = regexp.MustCompile(`(?s)<(?:\w+:)?Body[^>]*>\s*<(?:\w+:)?([A-Za-z]\w*)`)
 
 // onvifServer answers the SOAP calls NVRs actually make. It is not a bid for
@@ -285,7 +289,7 @@ func (o *onvifServer) authenticated(body string) bool {
 	// A Created far from our clock is a replayed or bogus token. ±300 s is
 	// what gSOAP-based devices allow.
 	when, err := time.Parse(time.RFC3339, created)
-	if err != nil || absDuration(time.Since(when)) > 5*time.Minute {
+	if err != nil || absDuration(time.Since(when)) > nonceWindow {
 		return false
 	}
 	if o.seenNonce(nonce, when) {
@@ -305,13 +309,25 @@ func (o *onvifServer) authenticated(body string) bool {
 func (o *onvifServer) seenNonce(nonce string, when time.Time) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	for n, t := range o.nonces {
-		if time.Since(t) > 10*time.Minute {
-			delete(o.nonces, n)
-		}
-	}
+
 	if _, used := o.nonces[nonce]; used {
 		return true
+	}
+	// Sweep only when the table has grown, rather than walking every entry on
+	// every request: a camera answers these all day.
+	if len(o.nonces) > 1024 {
+		for n, t := range o.nonces {
+			if time.Since(t) > nonceWindow {
+				delete(o.nonces, n)
+			}
+		}
+		// Still full of live entries: someone is flooding, so start over
+		// rather than grow without bound. The worst case is that a replay
+		// inside the window is not spotted, and the digest still has to be
+		// right.
+		if len(o.nonces) > 4096 {
+			o.nonces = map[string]time.Time{}
+		}
 	}
 	o.nonces[nonce] = when
 	return false

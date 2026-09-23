@@ -76,8 +76,9 @@ func avfoundationCameras(ffmpeg string) ([]string, error) {
 			continue
 		}
 		if m := avfIndexedName.FindStringSubmatch(line); m != nil {
-			// avfoundation takes the index, not the name.
-			cams = append(cams, m[1])
+			// avfoundation accepts the name as well as the index, and a name
+			// is what the window can sensibly show.
+			cams = append(cams, strings.TrimSpace(m[2]))
 		}
 	}
 	return cams, nil
