@@ -1,0 +1,49 @@
+name: desktop
+
+on:
+  push:
+    branches: [main]
+    paths: ["core/**", ".github/workflows/desktop.yml"]
+  pull_request:
+    paths: ["core/**", ".github/workflows/desktop.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, ext: ".exe" }
+          - { goos: windows, goarch: arm64, ext: ".exe" }
+          - { goos: darwin, goarch: arm64, ext: "" }
+          - { goos: darwin, goarch: amd64, ext: "" }
+          - { goos: linux, goarch: amd64, ext: "" }
+          - { goos: linux, goarch: arm64, ext: "" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      # No cgo anywhere, including the Windows DPAPI call, so every target
+      # cross-compiles from one runner.
+      - name: build
+        working-directory: core
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          out="chameleon-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          go build -trimpath -ldflags="-s -w" -o "$out" ./cmd/chameleon
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chameleon-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: core/chameleon-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}

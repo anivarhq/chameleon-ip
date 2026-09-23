@@ -1,0 +1,51 @@
+name: apple
+
+on:
+  push:
+    branches: [main]
+    paths: ["apple/**", "core/**", "scripts/build-core-apple.sh", ".github/workflows/apple.yml"]
+  pull_request:
+    paths: ["apple/**", "core/**", "scripts/build-core-apple.sh", ".github/workflows/apple.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: build the shared core
+        run: ./scripts/build-core-apple.sh
+
+      - name: generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd apple && xcodegen generate
+
+      # Unsigned simulator and Mac builds: enough to prove the app compiles
+      # and links against the core. Signed device builds need certificates,
+      # which belong in a release workflow, not on every push.
+      - name: build for iOS
+        working-directory: apple
+        run: |
+          xcodebuild build \
+            -project ChameleonIP.xcodeproj \
+            -scheme ChameleonIP \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO | tail -30
+
+      - name: build for macOS
+        working-directory: apple
+        run: |
+          xcodebuild build \
+            -project ChameleonIP.xcodeproj \
+            -scheme ChameleonIP \
+            -destination 'generic/platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO | tail -30
