@@ -7,7 +7,10 @@ import 'engine.dart';
 void main() => runApp(const ChameleonApp());
 
 class ChameleonApp extends StatelessWidget {
-  const ChameleonApp({super.key});
+  const ChameleonApp({super.key, this.engine});
+
+  /// Tests pass their own; the app makes the real one.
+  final CameraEngine? engine;
 
   @override
   Widget build(BuildContext context) {
@@ -24,20 +27,22 @@ class ChameleonApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
       ),
-      home: const CameraPage(),
+      home: CameraPage(engine: engine),
     );
   }
 }
 
 class CameraPage extends StatefulWidget {
-  const CameraPage({super.key});
+  const CameraPage({super.key, this.engine});
+
+  final CameraEngine? engine;
 
   @override
   State<CameraPage> createState() => _CameraPageState();
 }
 
 class _CameraPageState extends State<CameraPage> {
-  final _engine = Engine();
+  late final CameraEngine _engine = widget.engine ?? Engine();
   Status _status = const Status();
   List<String> _cameras = const [];
   String? _chosen;

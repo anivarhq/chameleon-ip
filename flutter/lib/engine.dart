@@ -30,22 +30,33 @@ class Status {
       );
 }
 
+/// What the window needs from an engine. The window depends on this rather
+/// than on the process, so it can be tested without spawning one.
+abstract class CameraEngine {
+  Stream<Status> get statuses;
+  Future<List<String>> cameras();
+  Future<void> start({String? camera});
+  Future<void> stop();
+}
+
 /// Drives the `chameleon` engine, which does the capturing and serving.
 ///
 /// The engine is a separate process rather than a library: it is the same
 /// binary on Windows, macOS and Linux, it already runs headless, and a crash
 /// in the camera pipeline cannot take the window down with it.
-class Engine {
+class Engine implements CameraEngine {
   Engine({String? executable}) : _executable = executable ?? _defaultExecutable();
 
   final String _executable;
   Process? _process;
 
   final _statuses = StreamController<Status>.broadcast();
+  @override
   Stream<Status> get statuses => _statuses.stream;
 
   bool get isRunning => _process != null;
 
+  @override
   Future<List<String>> cameras() async {
     final result = await Process.run(_executable, ['-list']);
     return const LineSplitter()
@@ -55,6 +66,7 @@ class Engine {
         .toList();
   }
 
+  @override
   Future<void> start({String? camera}) async {
     if (_process != null) return;
     final process = await Process.start(_executable, [
@@ -85,6 +97,7 @@ class Engine {
     }));
   }
 
+  @override
   Future<void> stop() async {
     _process?.kill();
     _process = null;
