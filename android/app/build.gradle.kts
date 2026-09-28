@@ -16,9 +16,26 @@ android {
         versionName = "0.1.0"
     }
 
+    // Release signing comes from the environment: CI decodes the key from the
+    // repo's secrets. Without it a release build is simply unsigned, so anyone
+    // can still run assembleRelease; only the key holder can publish one.
+    val keystore = System.getenv("CHAMELEON_KEYSTORE")
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storeType = "pkcs12"
+                storePassword = System.getenv("CHAMELEON_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("CHAMELEON_KEY_ALIAS")
+                keyPassword = System.getenv("CHAMELEON_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 
