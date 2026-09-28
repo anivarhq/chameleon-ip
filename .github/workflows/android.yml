@@ -117,6 +117,9 @@ jobs:
           name: chameleon-android
           path: apk
 
+      - name: ffmpeg, to play the stream the way a recorder does
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -136,5 +139,7 @@ jobs:
         if: always()
         with:
           name: emulator-screen
-          path: emulator-screen.png
+          path: |
+            emulator-screen.png
+            stream-frame.png
           if-no-files-found: ignore
