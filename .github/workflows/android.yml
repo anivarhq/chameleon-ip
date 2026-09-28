@@ -80,7 +80,9 @@ jobs:
           bt="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           apk=android/app/build/outputs/apk/release/app-release.apk
           "$bt/apksigner" verify --verbose --print-certs "$apk" | tee signing.txt
-          grep -q "Signer #1 certificate DN: CN=Chameleon IP" signing.txt
+          # The release key's certificate, pinned: a build signed with any other
+          # key could never update an installed copy.
+          grep -q "certificate SHA-256 digest: 9134451650f0f7c8af504b176e0e6b8a906f84cc2f81449c07b529a4233c746f" signing.txt
           "$bt/zipalign" -c -P 16 -v 4 "$apk" > /dev/null
           "$bt/aapt2" dump badging "$apk" | tee badging.txt | head -3
           grep -q "package: name='com.anivarhq.chameleon'" badging.txt
