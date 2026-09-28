@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-labelledby="t d">
+  <title id="t">Chameleon IP</title>
+  <desc id="d">Any phone or computer, as a camera. See it right on the device; add it to any recorder if you want. A phone shows a live picture of a front door, and a faint dotted line leads from it to a recorder, marked optional.</desc>
+  <style>
+    .w { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, 'Helvetica Neue', Arial, sans-serif; fill: #F5F2EF; }
+
+    /* Calm on purpose: the picture is live, and the recorder link is a quiet
+       extra. The resting styles ARE the finished frame, so with motion off
+       the banner still says everything. */
+    .rec    { animation: rec 1.6s ease-in-out infinite; }
+    .person { animation: sway 6s ease-in-out infinite; }
+    .link   { stroke-dasharray: 3 9; animation: flow 1.2s linear infinite; }
+    @keyframes rec  { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+    @keyframes sway { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(10px); } }
+    @keyframes flow { to { stroke-dashoffset: -12; } }
+    @media (prefers-reduced-motion: reduce) {
+      .rec, .person, .link { animation: none; }
+    }
+  </style>
+
+  <defs>
+    <radialGradient id="glow" cx="72%" cy="50%" r="55%">
+      <stop offset="0" stop-color="#5EB28C" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#5EB28C" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5EB28C"/>
+      <stop offset=".5" stop-color="#C9A25E"/>
+      <stop offset="1" stop-color="#C9605C"/>
+    </linearGradient>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A2522"/>
+      <stop offset="1" stop-color="#1B1817"/>
+    </linearGradient>
+    <clipPath id="screen"><rect x="0" y="0" width="128" height="226" rx="14"/></clipPath>
+  </defs>
+
+  <!-- A card of its own, so it sits well on GitHub's light and dark pages. -->
+  <rect width="1280" height="320" rx="20" fill="#0D0C0B"/>
+  <rect width="1280" height="320" rx="20" fill="url(#glow)"/>
+
+  <!-- Mark (the lens from the app's preview image), name, voice -->
+  <g transform="translate(80 70)">
+    <circle cx="36" cy="36" r="30" fill="none" stroke="url(#ring)" stroke-width="7"/>
+    <circle cx="36" cy="36" r="17" fill="#0D0C0B" stroke="#2F2A27" stroke-width="2"/>
+    <circle cx="30" cy="30" r="5" fill="#F5F2EF" opacity=".85"/>
+  </g>
+  <text class="w" x="176" y="124" font-size="58" font-weight="700" letter-spacing="-1.5">Chameleon IP</text>
+  <text class="w" x="82" y="204" font-size="30" font-weight="600" letter-spacing="-.4">Any phone or computer, as a camera.</text>
+  <text class="w" x="82" y="246" font-size="18" opacity=".62">See it right on the device. Add it to any recorder if you want.</text>
+
+  <!-- The phone, showing its own camera's picture -->
+  <g transform="translate(820 34)">
+    <rect x="-8" y="-8" width="144" height="252" rx="22" fill="#151312" stroke="#2F2A27" stroke-width="2"/>
+    <g clip-path="url(#screen)">
+      <rect width="128" height="226" fill="url(#wall)"/>
+      <rect y="168" width="128" height="58" fill="#221E1C"/>
+      <rect x="66" y="70" width="46" height="98" rx="3" fill="#312B28" stroke="#3B3430"/>
+      <circle cx="104" cy="124" r="2.5" fill="#5A4F48"/>
+      <g class="person">
+        <circle cx="42" cy="92" r="11" fill="#7A6A5E"/>
+        <rect x="27" y="104" width="30" height="42" rx="11" fill="#7A6A5E"/>
+        <rect x="30" y="140" width="10" height="28" rx="4" fill="#6A5B50"/>
+        <rect x="44" y="140" width="10" height="28" rx="4" fill="#6A5B50"/>
+        <rect x="50" y="116" width="20" height="16" rx="2" fill="#A58A74"/>
+      </g>
+      <!-- live badge -->
+      <rect x="8" y="10" width="46" height="18" rx="9" fill="#000000" opacity=".55"/>
+      <circle class="rec" cx="18" cy="19" r="3.5" fill="#C9605C"/>
+      <text class="w" x="25" y="23" font-size="10" font-weight="700" letter-spacing=".6">LIVE</text>
+    </g>
+  </g>
+
+  <!-- Optional: a recorder can watch it too -->
+  <path class="link" d="M 972 150 C 1010 150, 1030 150, 1062 150" fill="none" stroke="#5EB28C" stroke-width="2.5" stroke-linecap="round" opacity=".55"/>
+  <g transform="translate(1070 112)" opacity=".7">
+    <rect width="124" height="78" rx="10" fill="#151312" stroke="#2F2A27" stroke-width="2"/>
+    <rect x="10" y="10" width="48" height="27" rx="3" fill="#221E1C"/>
+    <rect x="66" y="10" width="48" height="27" rx="3" fill="#221E1C"/>
+    <rect x="10" y="41" width="48" height="27" rx="3" fill="#221E1C"/>
+    <rect x="66" y="41" width="48" height="27" rx="3" fill="#2A2522" stroke="#5EB28C" stroke-opacity=".6"/>
+  </g>
+  <text class="w" x="1132" y="214" font-size="13" text-anchor="middle" opacity=".5">any recorder · optional</text>
+</svg>
