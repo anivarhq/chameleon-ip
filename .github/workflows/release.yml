@@ -1,0 +1,73 @@
+name: release
+
+# Push a tag like v0.1.0 and this builds every platform through the same
+# workflows CI uses, then puts the files on a DRAFT release. Nothing is public
+# until a person has checked the draft and published it.
+#
+# Assets keep the same names every release, so a link to
+# releases/latest/download/<name> never goes stale.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  engines:
+    uses: ./.github/workflows/desktop.yml
+  apps:
+    uses: ./.github/workflows/flutter.yml
+  android:
+    uses: ./.github/workflows/android.yml
+    secrets: inherit
+
+  publish:
+    needs: [engines, apps, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: check, checksum and draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist
+          rm -f app-debug.apk   # CI's debug build rides along in the artifacts
+          ls -la
+
+          # Everything the README links to, or the release does not go out.
+          expected=(
+            ChameleonIP-windows-x64.zip ChameleonIP-macos.zip ChameleonIP-linux-x64.tar.gz
+            ChameleonIP-android.apk
+            chameleon-windows-amd64.exe chameleon-windows-arm64.exe
+            chameleon-darwin-arm64 chameleon-darwin-amd64
+            chameleon-linux-amd64 chameleon-linux-arm64
+          )
+          for f in "${expected[@]}"; do
+            [ -s "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          [ "$(ls | wc -l)" -eq "${#expected[@]}" ] || { echo "::error::unexpected files"; ls; exit 1; }
+
+          for f in "${expected[@]}"; do sha256sum "$f" > "$f.sha256"; done
+
+          # The notes are this version's CHANGELOG.md section.
+          version="${TAG#v}"
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            /^## \[/ { if (on) exit }
+            on' ../CHANGELOG.md > ../notes.md
+          [ -s ../notes.md ] || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
+
+          gh release create "$TAG" --draft --title "Chameleon IP $version" \
+            --notes-file ../notes.md --repo "$GITHUB_REPOSITORY" ./*

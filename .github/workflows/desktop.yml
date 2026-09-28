@@ -6,6 +6,8 @@ on:
     paths: ["core/**", ".github/workflows/desktop.yml"]
   pull_request:
     paths: ["core/**", ".github/workflows/desktop.yml"]
+  # release.yml calls this to build what it publishes.
+  workflow_call:
 
 permissions:
   contents: read

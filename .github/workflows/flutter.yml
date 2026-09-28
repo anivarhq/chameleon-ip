@@ -6,6 +6,8 @@ on:
     paths: ["flutter/**", "core/**", ".github/workflows/flutter.yml"]
   pull_request:
     paths: ["flutter/**", "core/**", ".github/workflows/flutter.yml"]
+  # release.yml calls this to build what it publishes.
+  workflow_call:
 
 permissions:
   contents: read
@@ -29,10 +31,24 @@ jobs:
           cache-dependency-path: core/go.sum
 
       - name: build the engine
+        if: matrix.platform != 'macos'
         working-directory: core
         env:
           CGO_ENABLED: "0"
         run: go build -trimpath -ldflags="-s -w" -o "../flutter/${{ matrix.engine }}" ./cmd/chameleon
+
+      # Flutter's macOS release is universal, so the engine inside it must be
+      # too: an arm64-only engine made the app fail on every Intel Mac.
+      - name: build the engine (macos, universal)
+        if: matrix.platform == 'macos'
+        working-directory: core
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o chameleon-arm64 ./cmd/chameleon
+          GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o chameleon-amd64 ./cmd/chameleon
+          lipo -create -output ../flutter/chameleon chameleon-arm64 chameleon-amd64
+          lipo -info ../flutter/chameleon
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
@@ -51,8 +67,36 @@ jobs:
       - name: prepare the project
         working-directory: flutter
         run: |
-          flutter create --project-name chameleon_ip --platforms=${{ matrix.platform }} .
+          flutter create --project-name chameleon_ip --org com.anivarhq --platforms=${{ matrix.platform }} .
           flutter pub get
+
+      # The scaffolding names the window, the file properties and the Mac app
+      # after the Dart package: users saw "chameleon_ip" in the title bar.
+      - name: name the app
+        working-directory: flutter
+        shell: bash
+        run: |
+          case "${{ matrix.platform }}" in
+            windows) sed -i 's/"chameleon_ip"/"Chameleon IP"/g' windows/runner/main.cpp windows/runner/Runner.rc ;;
+            linux)   grep -rl '"chameleon_ip"' linux --include='*.cc' | xargs sed -i 's/"chameleon_ip"/"Chameleon IP"/g' ;;
+            macos)   sed -i '' 's/^PRODUCT_NAME = .*/PRODUCT_NAME = Chameleon IP/' macos/Runner/Configs/AppInfo.xcconfig ;;
+          esac
+          grep -rq "Chameleon IP" "${{ matrix.platform }}" || { echo "::error::the app name was not set"; exit 1; }
+
+      # Flutter's template sandboxes the Mac app, which is for the App Store and
+      # would stop this one outright: the sandbox blocks starting the engine
+      # from the bundle with a listening server, and running a Homebrew ffmpeg.
+      # macOS also ends any app that opens the camera without saying why.
+      - name: macOS permissions
+        if: matrix.platform == 'macos'
+        working-directory: flutter/macos/Runner
+        run: |
+          for f in Release.entitlements DebugProfile.entitlements; do
+            plutil -replace com.apple.security.app-sandbox -bool NO "$f"
+          done
+          plutil -insert NSCameraUsageDescription -string "Chameleon IP streams this camera to the recorder you add it to." Info.plist
+          plutil -insert NSLocalNetworkUsageDescription -string "Chameleon IP serves the camera on your local network, so a recorder can find it and add it." Info.plist
+          plutil -p Release.entitlements; plutil -p Info.plist | grep UsageDescription
 
       - name: analyze
         working-directory: flutter
@@ -66,27 +110,51 @@ jobs:
         working-directory: flutter
         run: flutter build ${{ matrix.platform }} --release
 
-      # The engine ships beside the app, which is where it looks for it.
-      - name: bundle the engine (windows)
+      # Packaged here, on the machine that built it: an artifact does not keep
+      # file permissions, so a macOS app or Linux bundle passed through one as
+      # loose files arrives unable to run. The engine ships beside the app,
+      # which is where the window looks for it.
+      - name: package (windows)
         if: matrix.platform == 'windows'
         working-directory: flutter
-        run: copy chameleon.exe build\windows\x64\runner\Release\
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $app = "build\windows\x64\runner\Release"
+          Copy-Item chameleon.exe $app
+          # The runner links the Visual C++ runtime dynamically. Beside the exe,
+          # the app starts on a machine that never installed it.
+          foreach ($dll in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
+            Copy-Item "$env:SystemRoot\System32\$dll" $app
+          }
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item -Recurse $app "stage\Chameleon IP"
+          Compress-Archive -Path "stage\Chameleon IP" -DestinationPath "$env:GITHUB_WORKSPACE\ChameleonIP-windows-x64.zip"
 
-      - name: bundle the engine (linux)
+      - name: package (linux)
         if: matrix.platform == 'linux'
         working-directory: flutter
-        run: cp chameleon build/linux/x64/release/bundle/
+        run: |
+          cp chameleon build/linux/x64/release/bundle/
+          tar -C build/linux/x64/release --transform 's,^bundle,ChameleonIP,' \
+            -czf "$GITHUB_WORKSPACE/ChameleonIP-linux-x64.tar.gz" bundle
 
-      - name: bundle the engine (macos)
+      # Adding the engine to the bundle breaks the ad-hoc signature Flutter
+      # applied, and macOS then calls the app damaged. Sign it again, ad hoc:
+      # there is no Developer ID yet, so Gatekeeper still asks once.
+      - name: package (macos)
         if: matrix.platform == 'macos'
         working-directory: flutter
-        run: cp chameleon "build/macos/Build/Products/Release/chameleon_ip.app/Contents/MacOS/"
+        run: |
+          app="build/macos/Build/Products/Release/Chameleon IP.app"
+          [ -d "$app" ] || { echo "::error::no $app"; ls build/macos/Build/Products/Release; exit 1; }
+          cp chameleon "$app/Contents/MacOS/"
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          ditto -c -k --keepParent "$app" "$GITHUB_WORKSPACE/ChameleonIP-macos.zip"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: chameleon-app-${{ matrix.platform }}
-          path: |
-            flutter/build/windows/x64/runner/Release/
-            flutter/build/linux/x64/release/bundle/
-            flutter/build/macos/Build/Products/Release/chameleon_ip.app
+          path: ChameleonIP-*
           if-no-files-found: error
