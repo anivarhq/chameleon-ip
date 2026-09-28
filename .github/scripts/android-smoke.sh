@@ -10,7 +10,9 @@ pkg=com.anivarhq.chameleon
 
 fail() {
   echo "::error::$1"
-  adb logcat -d | grep -E "$pkg|AndroidRuntime|FATAL|chameleon" | tail -80 || true
+  # The app's own tags (ChameleonCamera, GoLog), the camera and codec services,
+  # and anything that died: enough to tell "no frames" from "bad frames".
+  adb logcat -d | grep -iE "chameleon|GoLog|CameraService|Camera3|CCodec|MediaCodec|AndroidRuntime|FATAL" | tail -120 || true
   exit 1
 }
 
@@ -66,10 +68,10 @@ url=$(adb shell cat /sdcard/ui.xml | grep -o 'rtsp://[^@"]*@[^"/]*:8554/main' | 
 [ -n "$url" ] || fail "no address shown after Use with a recorder"
 local_url=$(echo "$url" | sed -E 's#@[^/]*:8554/#@127.0.0.1:8554/#')
 adb forward tcp:8554 tcp:8554
-probe=$(ffprobe -v error -rtsp_transport tcp -select_streams v:0   -show_entries stream=codec_name,width,height -of csv=p=0 "$local_url" || true)
+probe=$(timeout 40 ffprobe -v error -rtsp_transport tcp -select_streams v:0   -show_entries stream=codec_name,width,height -of csv=p=0 "$local_url" || true)
 echo "stream: $probe"
 [ "$probe" = "h264,1280,720" ] || fail "the stream is not H.264 1280x720 (got: $probe)"
-ffmpeg -v error -rtsp_transport tcp -i "$local_url" -frames:v 1 -y stream-frame.png || true
+timeout 40 ffmpeg -v error -rtsp_transport tcp -i "$local_url" -frames:v 1 -y stream-frame.png || true
 if adb logcat -d | grep -q "FATAL EXCEPTION"; then
   fail "a crash was logged"
 fi
