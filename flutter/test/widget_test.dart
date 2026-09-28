@@ -15,8 +15,14 @@ class FakeEngine implements CameraEngine {
   @override
   Stream<Status> get statuses => _controller.stream;
 
+  /// When set, listing cameras fails the way the real engine does.
+  Object? listError;
+
   @override
-  Future<List<String>> cameras() async => ['Integrated Camera', 'Doorbell'];
+  Future<List<String>> cameras() async {
+    if (listError != null) throw listError!;
+    return ['Integrated Camera', 'Doorbell'];
+  }
 
   @override
   Future<void> start({String? camera}) async {
@@ -71,6 +77,16 @@ void main() {
     // Nothing to add to an NVR until something is streaming.
     expect(find.text('Add this to your NVR'), findsNothing);
     expect(find.text('Integrated Camera'), findsOneWidget);
+  });
+
+  testWidgets('says what the engine refused, not that there is no camera', (tester) async {
+    final engine = FakeEngine()
+      ..listError = const EngineError('ffmpeg not found. Chameleon IP needs it to read the camera');
+    await tester.pumpWidget(ChameleonApp(engine: engine));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('ffmpeg not found'), findsOneWidget);
+    expect(find.textContaining('Could not find the engine'), findsNothing);
   });
 
   testWidgets('shows the address and who is watching once started', (tester) async {

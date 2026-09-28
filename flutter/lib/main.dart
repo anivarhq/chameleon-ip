@@ -78,7 +78,8 @@ class _CameraPageState extends State<CameraPage> {
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _status = Status(error: 'Could not find the engine: $error'));
+      setState(() => _status = Status(
+          error: error is EngineError ? error.message : 'Could not find the engine: $error'));
     }
   }
 

@@ -2,6 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+/// The engine ran and refused, with a message meant for the user.
+class EngineError implements Exception {
+  const EngineError(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// What the engine last reported.
 class Status {
   const Status({
@@ -59,6 +68,11 @@ class Engine implements CameraEngine {
   @override
   Future<List<String>> cameras() async {
     final result = await Process.run(_executable, ['-list']);
+    // A failed listing (no ffmpeg, say) is an error to show, not an empty list:
+    // read as "no cameras", it told the user their machine had none.
+    if (result.exitCode != 0) {
+      throw EngineError((result.stderr as String).trim());
+    }
     return const LineSplitter()
         .convert(result.stdout as String)
         .map((line) => line.trim())

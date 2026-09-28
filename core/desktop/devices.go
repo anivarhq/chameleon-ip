@@ -3,12 +3,45 @@ package desktop
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 )
+
+// FindFFmpeg resolves the ffmpeg to run: the one asked for (a path, or a name
+// on PATH), else one sitting beside this program.
+//
+// Without this check a missing ffmpeg was invisible: the device listing ran
+// nothing, found nothing, and the user was told this machine had no camera.
+func FindFFmpeg(want string) (string, error) {
+	if want == "" {
+		want = "ffmpeg"
+	}
+	if p, err := exec.LookPath(want); err == nil {
+		return p, nil
+	}
+	name := "ffmpeg"
+	if runtime.GOOS == "windows" {
+		name = "ffmpeg.exe"
+	}
+	if exe, err := os.Executable(); err == nil {
+		beside := filepath.Join(filepath.Dir(exe), name)
+		if _, err := os.Stat(beside); err == nil {
+			return beside, nil
+		}
+	}
+	install := "sudo apt install ffmpeg (or your distribution's package)"
+	switch runtime.GOOS {
+	case "windows":
+		install = "winget install Gyan.FFmpeg"
+	case "darwin":
+		install = "brew install ffmpeg"
+	}
+	return "", fmt.Errorf("ffmpeg not found. Chameleon IP needs it to read the camera: install it with `%s`, or put %s next to this program", install, name)
+}
 
 // Cameras lists the capture devices this machine has, as ffmpeg names them.
 func Cameras(ffmpeg string) ([]string, error) {

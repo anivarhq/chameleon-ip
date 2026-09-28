@@ -29,6 +29,16 @@ func main() {
 		rtspPort = flag.Int("port", 0, "RTSP port (default 8554)")
 	)
 	flag.Parse()
+	// Plain messages: the desktop window shows stderr lines to the user as-is.
+	log.SetFlags(0)
+
+	if !*rotate {
+		path, err := desktop.FindFFmpeg(*ffmpeg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		*ffmpeg = path
+	}
 
 	if *list {
 		cams, err := desktop.Cameras(*ffmpeg)
