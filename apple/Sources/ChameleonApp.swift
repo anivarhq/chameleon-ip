@@ -18,9 +18,13 @@ struct ChameleonApp: App {
     }
 }
 
+/// Camera first: turn it on and the picture is the screen. Watching or
+/// recording it on another device is an optional button, never something the
+/// screen implies you must do to see anything.
 struct CameraScreen: View {
     @ObservedObject var engine: CameraEngine
     @State private var guarding = false
+    @State private var sharing = false
 
     var body: some View {
         ZStack {
@@ -33,36 +37,45 @@ struct CameraScreen: View {
                     .onTapGesture { guarding = false }
             } else {
                 CameraPreview(session: engine.session).ignoresSafeArea()
+                if !engine.isRunning {
+                    Text("Camera is off").foregroundStyle(.white.opacity(0.6))
+                }
                 overlay
             }
         }
         .onChange(of: engine.isRunning) { running in
             guarding = false
-            if !running { return }
+            if !running { sharing = false }
         }
     }
 
     private var overlay: some View {
         VStack {
             HStack {
-                Label(status, systemImage: engine.isRunning ? "dot.radiowaves.left.and.right" : "video.slash")
-                    .foregroundStyle(.white)
-                    .padding(10)
-                    .background(.black.opacity(0.45), in: Capsule())
+                if engine.isRunning {
+                    Label(status, systemImage: "circle.fill")
+                        .foregroundStyle(.white)
+                        .padding(10)
+                        .background(.black.opacity(0.45), in: Capsule())
+                }
                 Spacer()
             }
             .padding()
 
             Spacer()
 
-            if engine.isRunning {
-                Text(streamURL)
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.white)
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
-                    .padding(.horizontal)
+            if engine.isRunning && sharing {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Optional: to watch or record this camera on another device, add this address in Anivar, Frigate, Blue Iris, VLC or any app that takes RTSP or ONVIF cameras.")
+                        .font(.footnote)
+                    Text(streamURL)
+                        .font(.footnote.monospaced())
+                        .textSelection(.enabled)
+                }
+                .foregroundStyle(.white)
+                .padding(12)
+                .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal)
             }
 
             if let problem = engine.problem {
@@ -70,12 +83,14 @@ struct CameraScreen: View {
             }
 
             HStack(spacing: 16) {
-                Button(engine.isRunning ? "Stop" : "Start camera") {
+                Button(engine.isRunning ? "Turn off camera" : "Turn on camera") {
                     engine.isRunning ? engine.stop() : engine.start()
                 }
                 .buttonStyle(.borderedProminent)
 
                 if engine.isRunning {
+                    Button(sharing ? "Hide address" : "Use with a recorder") { sharing.toggle() }
+                        .buttonStyle(.bordered)
                     Button("Guard") { guarding = true }.buttonStyle(.bordered)
                 }
             }
@@ -84,8 +99,11 @@ struct CameraScreen: View {
     }
 
     private var status: String {
-        if !engine.isRunning { return "Not streaming" }
-        return engine.viewers > 0 ? "\(engine.viewers) watching" : "Waiting for a viewer"
+        switch engine.viewers {
+        case 0: return "Live"
+        case 1: return "Live · 1 other device watching"
+        default: return "Live · \(engine.viewers) other devices watching"
+        }
     }
 
     private var streamURL: String {
@@ -101,7 +119,7 @@ struct GuardScreen: View {
     var body: some View {
         VStack {
             Spacer()
-            Text(viewers > 0 ? "\(viewers) watching" : "Streaming")
+            Text(viewers > 0 ? "Live · \(viewers) watching" : "Live")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.25))
                 .offset(y: offset)
@@ -131,7 +149,7 @@ struct CameraPreview: UIViewRepresentable {
             super.init(frame: .zero)
             let layer = self.layer as! AVCaptureVideoPreviewLayer
             layer.session = session
-            layer.videoGravity = .resizeAspectFill
+            layer.videoGravity = .resizeAspect
         }
         required init?(coder: NSCoder) { fatalError() }
     }
@@ -143,7 +161,7 @@ struct CameraPreview: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         let layer = AVCaptureVideoPreviewLayer(session: session)
-        layer.videoGravity = .resizeAspectFill
+        layer.videoGravity = .resizeAspect
         view.layer = layer
         view.wantsLayer = true
         return view
