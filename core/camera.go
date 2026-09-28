@@ -282,11 +282,21 @@ func (c *Camera) PushAU(au [][]byte, pts time.Duration) error {
 		c.mu.Unlock()
 		return errors.New("not started")
 	}
-	if sps, pps := parameterSets(au); sps != nil && pps != nil &&
-		(!bytes.Equal(sps, c.sps) || !bytes.Equal(pps, c.pps)) {
+	// Each parameter set is kept as it arrives. Android's software encoder
+	// sends SPS and PPS in separate buffers, and waiting for both in one
+	// access unit meant they were never kept: every keyframe went out
+	// without them, and no player could ever decode the stream.
+	sps, pps := parameterSets(au)
+	changed := false
+	if sps != nil && !bytes.Equal(sps, c.sps) {
+		c.sps, changed = sps, true
+	}
+	if pps != nil && !bytes.Equal(pps, c.pps) {
+		c.pps, changed = pps, true
+	}
+	if changed && c.sps != nil && c.pps != nil {
 		// Resolution or encoder settings changed: tell anyone who asks.
-		c.sps, c.pps = sps, pps
-		c.forma.SafeSetParams(sps, pps)
+		c.forma.SafeSetParams(c.sps, c.pps)
 		stream.ReloadDesc()
 	}
 	au = prepareAU(au, c.sps, c.pps)

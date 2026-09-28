@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -119,4 +120,39 @@ func TestPushIsSafeFromSeveralThreads(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+// Android's software encoder sends SPS and PPS in separate buffers. Both must
+// be kept, published in the stream description, and put before each keyframe,
+// or nothing can decode the stream.
+func TestParameterSetsArrivingSeparately(t *testing.T) {
+	cam := New(Config{User: "admin", Pass: "test1234"})
+	cam.cfg.Address = "127.0.0.1:" + freePort(t)
+	cam.cfg.ONVIFAddress = "127.0.0.1:" + freePort(t)
+	if err := cam.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer cam.Stop()
+
+	sps := []byte{0x67, 0x42, 0x00, 0x1f}
+	pps := []byte{0x68, 0xce, 0x38, 0x80}
+	idr := []byte{0x65, 0x01, 0x02, 0x03}
+	for i, au := range [][][]byte{{sps}, {pps}, {idr}} {
+		if err := cam.PushAU(au, time.Duration(i)*time.Millisecond); err != nil {
+			t.Fatalf("push %d: %v", i, err)
+		}
+	}
+
+	cam.mu.Lock()
+	gotSPS, gotPPS := cam.sps, cam.pps
+	cam.mu.Unlock()
+	if !bytes.Equal(gotSPS, sps) || !bytes.Equal(gotPPS, pps) {
+		t.Fatalf("kept sps=% x pps=% x; want both", gotSPS, gotPPS)
+	}
+	if !bytes.Equal(cam.forma.SPS, sps) || !bytes.Equal(cam.forma.PPS, pps) {
+		t.Fatal("the stream description does not carry the parameter sets")
+	}
+	if got := prepareAU([][]byte{idr}, gotSPS, gotPPS); len(got) != 3 {
+		t.Fatalf("a keyframe goes out as %d NAL units; want SPS, PPS, IDR", len(got))
+	}
 }
