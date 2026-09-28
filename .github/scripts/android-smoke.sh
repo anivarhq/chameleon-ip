@@ -68,7 +68,8 @@ url=$(adb shell cat /sdcard/ui.xml | grep -o 'rtsp://[^@"]*@[^"/]*:8554/main' | 
 [ -n "$url" ] || fail "no address shown after Use with a recorder"
 local_url=$(echo "$url" | sed -E 's#@[^/]*:8554/#@127.0.0.1:8554/#')
 adb forward tcp:8554 tcp:8554
-probe=$(timeout 40 ffprobe -v error -rtsp_transport tcp -select_streams v:0   -show_entries stream=codec_name,width,height -of csv=p=0 "$local_url" || true)
+probe=$(timeout 40 ffprobe -v warning -rtsp_transport tcp -select_streams v:0   -show_entries stream=codec_name,width,height -of csv=p=0 "$local_url" 2> probe.log || true)
+echo "ffprobe said:"; tail -20 probe.log || true
 echo "stream: $probe"
 [ "$probe" = "h264,1280,720" ] || fail "the stream is not H.264 1280x720 (got: $probe)"
 timeout 40 ffmpeg -v error -rtsp_transport tcp -i "$local_url" -frames:v 1 -y stream-frame.png || true

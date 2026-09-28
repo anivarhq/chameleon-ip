@@ -68,6 +68,7 @@ class CameraPipeline(
     }
 
     private var epochNanos = 0L
+    private var encoded = 0L
 
     fun start() {
         require(
@@ -120,6 +121,12 @@ class CameraPipeline(
                         if (epochNanos == 0L) epochNanos = info.presentationTimeUs * 1000
                         val ptsMicros = info.presentationTimeUs - epochNanos / 1000
                         Mobile.pushFrame(frame, ptsMicros)
+                        // A pulse in the log every ten seconds or so: whether
+                        // frames are flowing is the first question about a
+                        // stream that shows nothing.
+                        if (++encoded % 150L == 1L) {
+                            Log.i(TAG, "encoded $encoded frames; last ${info.size} bytes, flags ${info.flags}")
+                        }
                     }
                 } catch (t: Throwable) {
                     Log.w(TAG, "push failed", t)
