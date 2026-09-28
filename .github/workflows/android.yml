@@ -131,3 +131,10 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
           script: bash .github/scripts/android-smoke.sh apk/ChameleonIP-android.apk
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: emulator-screen
+          path: emulator-screen.png
+          if-no-files-found: ignore

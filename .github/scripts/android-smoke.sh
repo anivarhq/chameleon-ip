@@ -22,12 +22,12 @@ adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 > /dev/null
 sleep 10
 adb shell pidof "$pkg" > /dev/null || fail "the app is not running 10 s after launch"
 
-# Press "Start camera" wherever the layout put it.
+# Press "Turn on camera" wherever the layout put it.
 adb shell uiautomator dump /sdcard/ui.xml > /dev/null
 bounds=$(adb shell cat /sdcard/ui.xml \
-  | grep -io 'text="Start camera"[^>]*bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' \
+  | grep -io 'text="Turn on camera"[^>]*bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' \
   | grep -o '\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]' | head -1 || true)
-[ -n "$bounds" ] || fail "no Start camera button on screen"
+[ -n "$bounds" ] || fail "no Turn on camera button on screen"
 read -r x1 y1 x2 y2 <<< "$(echo "$bounds" | tr -c '0-9' ' ')"
 adb shell input tap $(( (x1 + x2) / 2 )) $(( (y1 + y2) / 2 ))
 
@@ -38,13 +38,15 @@ for i in $(seq 1 30); do
     echo "RTSP port 8554 is listening"
     break
   fi
-  [ "$i" -eq 30 ] && fail "RTSP port 8554 never opened after Start camera"
+  [ "$i" -eq 30 ] && fail "RTSP port 8554 never opened after Turn on camera"
   sleep 1
 done
 
-# Let the camera and encoder run a while before judging.
+# Let the camera and encoder run a while before judging, then keep a picture
+# of the screen: the preview's shape and orientation are for a person to see.
 sleep 15
-adb shell pidof "$pkg" > /dev/null || fail "the app died after Start camera"
+adb exec-out screencap -p > emulator-screen.png || true
+adb shell pidof "$pkg" > /dev/null || fail "the app died after Turn on camera"
 if adb logcat -d | grep -q "FATAL EXCEPTION"; then
   fail "a crash was logged"
 fi

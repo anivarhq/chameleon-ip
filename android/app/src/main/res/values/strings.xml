@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Chameleon IP</string>
-    <string name="start">Start camera</string>
-    <string name="stop">Stop</string>
-    <string name="idle">Not streaming</string>
-    <string name="streaming">Streaming</string>
-    <string name="waiting">Waiting for a viewer</string>
-    <string name="needs_camera">Chameleon needs the camera to work.</string>
-    <string name="rtsp_url">Add this to your NVR:\nrtsp://%1$s:%2$s@%3$s:%4$d/main</string>
-    <plurals name="watching">
-        <item quantity="one">%d watching</item>
-        <item quantity="other">%d watching</item>
+    <string name="start">Turn on camera</string>
+    <string name="stop">Turn off camera</string>
+    <string name="off">Camera is off</string>
+    <string name="live">Live</string>
+    <plurals name="live_watching">
+        <item quantity="one">Live · %d other device watching</item>
+        <item quantity="other">Live · %d other devices watching</item>
     </plurals>
+    <string name="needs_camera">Chameleon IP needs the camera to show you its picture.</string>
+    <!-- Sharing is optional: the picture is on this screen already. -->
+    <string name="share">Use with a recorder</string>
+    <string name="share_hide">Hide address</string>
+    <string name="share_text">Optional: to watch or record this camera on another device, add this address in Anivar, Frigate, Blue Iris, VLC or any app that takes RTSP or ONVIF cameras.\n\nrtsp://%1$s:%2$s@%3$s:%4$d/main</string>
 </resources>

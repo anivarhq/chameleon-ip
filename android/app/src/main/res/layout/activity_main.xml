@@ -1,13 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The camera's picture is the screen. Sharing it is a button at the bottom. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <SurfaceView
+    <com.anivarhq.chameleon.PreviewView
         android:id="@+id/preview"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center" />
+
+    <TextView
+        android:id="@+id/off"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="@string/off"
+        android:textColor="#99FFFFFF"
+        android:textSize="16sp" />
 
     <TextView
         android:id="@+id/status"
@@ -15,26 +26,53 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
         android:layout_margin="16dp"
+        android:background="#8C000000"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
         android:textColor="#FFFFFF"
-        android:textSize="16sp" />
+        android:textSize="14sp"
+        android:visibility="gone" />
 
-    <TextView
-        android:id="@+id/address"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:layout_marginBottom="88dp"
-        android:layout_marginHorizontal="16dp"
-        android:textColor="#FFFFFF"
-        android:textIsSelectable="true"
-        android:textSize="13sp"
-        android:visibility="gone" />
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="16dp">
 
-    <Button
-        android:id="@+id/toggle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="24dp"
-        android:text="@string/start" />
+        <TextView
+            android:id="@+id/address"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:background="#B3000000"
+            android:padding="12dp"
+            android:textColor="#FFFFFF"
+            android:textIsSelectable="true"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/start" />
+
+            <Button
+                android:id="@+id/share"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/share"
+                android:textColor="#FFFFFF"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
 </FrameLayout>
