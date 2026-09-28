@@ -64,12 +64,16 @@
                 android:layout_height="wrap_content"
                 android:text="@string/start" />
 
+            <!-- A dark backing: white text straight over a bright picture
+                 vanished (seen on the emulator). -->
             <Button
                 android:id="@+id/share"
                 style="?android:attr/borderlessButtonStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
+                android:background="#99000000"
+                android:paddingHorizontal="16dp"
                 android:text="@string/share"
                 android:textColor="#FFFFFF"
                 android:visibility="gone" />
