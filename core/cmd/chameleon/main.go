@@ -6,12 +6,14 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +27,7 @@ func main() {
 		device   = flag.String("device", "", "camera to use; default is the first one")
 		list     = flag.Bool("list", false, "list cameras and exit")
 		jsonOut  = flag.Bool("json", false, "print status as JSON lines, for the desktop app")
+		preview  = flag.Bool("preview", false, "with -json, also print small JPEG frames, for the desktop app's picture")
 		rotate   = flag.Bool("rotate-password", false, "generate a new password and exit")
 		rtspPort = flag.Int("port", 0, "RTSP port (default 8554)")
 	)
@@ -105,7 +108,7 @@ func main() {
 	if *jsonOut {
 		emit(status)
 	} else {
-		fmt.Println("Add this to your NVR:")
+		fmt.Println("The camera is on. To watch or record it on another device, add:")
 		fmt.Println("   ", status.StreamURL)
 		if status.Notes != "" {
 			fmt.Println("Limitations:", status.Notes)
@@ -126,11 +129,29 @@ func main() {
 		}
 	}()
 
-	err = desktop.Capture(ctx, cam, desktop.Options{
+	opts := desktop.Options{
 		FFmpeg: *ffmpeg, Device: settings.Device,
 		Width: settings.Width, Height: settings.Height,
 		FPS: settings.FPS, Bitrate: settings.Bitrate,
-	})
+	}
+	if *jsonOut && *preview {
+		// Hold one frame at most and drop the rest while the window is busy:
+		// a window that stops reading must never stall the stream.
+		frames := make(chan []byte, 1)
+		opts.Preview = func(jpeg []byte) {
+			select {
+			case frames <- jpeg:
+			default:
+			}
+		}
+		go func() {
+			for jpeg := range frames {
+				emitFrame(jpeg)
+			}
+		}()
+	}
+
+	err = desktop.Capture(ctx, cam, opts)
 	if err != nil && ctx.Err() == nil {
 		if *jsonOut {
 			status.Error = err.Error()
@@ -149,10 +170,28 @@ func lastRunes(s string, n int) string {
 	return s[len(s)-n:]
 }
 
+// out serialises stdout: status and preview lines come from different
+// goroutines, and two writes to a pipe can interleave into garbage.
+var out sync.Mutex
+
 func emit(s desktop.Status) {
 	line, err := json.Marshal(s)
 	if err != nil {
 		return
 	}
+	out.Lock()
+	defer out.Unlock()
+	fmt.Println(string(line))
+}
+
+// emitFrame prints one preview JPEG as its own kind of line, which the
+// window tells apart from a status by its "frame" key.
+func emitFrame(jpeg []byte) {
+	line, err := json.Marshal(map[string]string{"frame": base64.StdEncoding.EncodeToString(jpeg)})
+	if err != nil {
+		return
+	}
+	out.Lock()
+	defer out.Unlock()
 	fmt.Println(string(line))
 }

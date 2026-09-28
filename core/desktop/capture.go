@@ -12,8 +12,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +32,15 @@ type Options struct {
 	FPS     int
 	Bitrate int
 	Encoder string // empty means pick the best available
+
+	// Preview, when set, receives small JPEGs of what the camera sees (640 px
+	// wide, 10 a second) for the desktop window. It must not block: a slow
+	// preview would otherwise stall ffmpeg, and the stream with it.
+	Preview func(jpeg []byte)
 }
+
+// previewBoundary separates the preview JPEGs on the loopback socket.
+const previewBoundary = "chameleonpreview"
 
 // Capture runs ffmpeg and pushes every encoded frame into the camera until
 // the context is cancelled.
@@ -48,7 +59,23 @@ func Capture(ctx context.Context, cam *core.Camera, o Options) error {
 		o.Encoder = BestEncoder(o.FFmpeg)
 	}
 
-	cmd := exec.CommandContext(ctx, o.FFmpeg, o.args()...)
+	// The preview is a second output of the same ffmpeg: the camera is opened
+	// and decoded once, the stream NVRs get is untouched, and the only extra
+	// work is a small JPEG encode. It reaches us over a loopback socket, since
+	// stdout already carries the stream and Windows gives a child no other pipe.
+	args := o.args()
+	var preview net.Listener
+	if o.Preview != nil {
+		if ln, err := net.Listen("tcp", "127.0.0.1:0"); err != nil {
+			cam.Note("preview", err) // the stream matters more than the window's picture
+		} else {
+			preview = ln
+			defer ln.Close()
+			args = append(args, previewArgs(ln.Addr().String())...)
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, o.FFmpeg, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -68,6 +95,10 @@ func Capture(ctx context.Context, cam *core.Camera, o Options) error {
 		cam.Note("child supervision", err)
 	}
 	defer release()
+
+	if preview != nil {
+		go readPreview(preview, o.Preview)
+	}
 
 	// ffmpeg cannot be asked for a keyframe on demand, so a viewer joining
 	// mid-GOP waits for the next one; the 2 s interval bounds that wait.
@@ -122,6 +153,63 @@ func (o Options) args() []string {
 }
 
 func (o Options) size() string { return fmt.Sprintf("%dx%d", o.Width, o.Height) }
+
+// previewArgs adds ffmpeg's second output: 640-pixel JPEGs at 10 fps, each
+// with its length in a multipart header, sent to the engine over loopback.
+func previewArgs(addr string) []string {
+	return []string{
+		"-vf", "fps=10,scale=640:-2",
+		"-c:v", "mjpeg", "-q:v", "7",
+		"-f", "mpjpeg", "-boundary_tag", previewBoundary,
+		"tcp://" + addr,
+	}
+}
+
+// readPreview takes the preview JPEGs off the socket and hands each to fn. It
+// accepts exactly one connection, ffmpeg's, then stops listening.
+func readPreview(ln net.Listener, fn func([]byte)) {
+	conn, err := ln.Accept()
+	_ = ln.Close()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	_ = splitPreview(conn, fn)
+}
+
+// splitPreview reads ffmpeg's mpjpeg stream and hands over each JPEG as soon
+// as its Content-length worth of bytes is in. (A multipart reader waits for
+// the NEXT boundary to end a part, which kept the window a frame behind.)
+func splitPreview(r io.Reader, fn func([]byte)) error {
+	br := bufio.NewReaderSize(r, 1<<16)
+	length := -1
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			return err
+		}
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "" && length >= 0:
+			// A preview frame is tens of kilobytes; anything past 8 MB is not one.
+			if length > 8<<20 {
+				return fmt.Errorf("preview frame of %d bytes", length)
+			}
+			jpeg := make([]byte, length)
+			if _, err := io.ReadFull(br, jpeg); err != nil {
+				return err
+			}
+			if length > 2 && jpeg[0] == 0xFF && jpeg[1] == 0xD8 {
+				fn(jpeg)
+			}
+			length = -1
+		case strings.HasPrefix(strings.ToLower(line), "content-length:"):
+			if length, err = strconv.Atoi(strings.TrimSpace(line[len("content-length:"):])); err != nil {
+				return err
+			}
+		}
+	}
+}
 
 // nalScanner splits an Annex-B stream into NAL units.
 //

@@ -3,6 +3,10 @@ package desktop
 import (
 	"bufio"
 	"bytes"
+	"fmt"
+	"io"
+	"net"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -126,4 +130,74 @@ func hexDigit(b byte) byte {
 		return '0' + b
 	}
 	return 'a' + b - 10
+}
+
+// The preview arrives as ffmpeg's mpjpeg output: each JPEG after a boundary
+// and a Content-length header. Every image must come out whole, and in order.
+func TestSplitPreview(t *testing.T) {
+	jpegs := [][]byte{
+		{0xFF, 0xD8, 0x01, 0xFF, 0xD9},
+		{0xFF, 0xD8, 0x0D, 0x0A, 0x2D, 0x2D, 0xFF, 0xD9}, // CR LF "--" inside the data
+		{0xFF, 0xD8, 0xFF, 0xD9},
+	}
+	var stream bytes.Buffer
+	for _, j := range jpegs {
+		fmt.Fprintf(&stream, "--%s\r\nContent-type: image/jpeg\r\nContent-length: %d\r\n\r\n", previewBoundary, len(j))
+		stream.Write(j)
+		stream.WriteString("\r\n")
+	}
+
+	var got [][]byte
+	_ = splitPreview(&stream, func(j []byte) { got = append(got, j) })
+
+	if len(got) != len(jpegs) {
+		t.Fatalf("got %d frames, want %d", len(got), len(jpegs))
+	}
+	for i := range jpegs {
+		if !bytes.Equal(got[i], jpegs[i]) {
+			t.Errorf("frame %d = % x, want % x", i, got[i], jpegs[i])
+		}
+	}
+}
+
+// The real ffmpeg, the real preview arguments, beside an H.264 output as in
+// Capture: frames must arrive as whole JPEGs at about the preview rate.
+// A synthetic source, so no webcam is needed; skipped where ffmpeg is absent.
+func TestPreviewFromFFmpeg(t *testing.T) {
+	ffmpeg, err := FindFFmpeg("")
+	if err != nil {
+		t.Skip("no ffmpeg:", err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := append([]string{"-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc=size=1280x720:rate=15:duration=3",
+		"-c:v", "libx264", "-f", "h264", "-"}, previewArgs(ln.Addr().String())...)
+	cmd := exec.Command(ffmpeg, args...)
+	cmd.Stdout = io.Discard
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	var frames [][]byte
+	done := make(chan struct{})
+	go func() { readPreview(ln, func(j []byte) { frames = append(frames, j) }); close(done) }()
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("ffmpeg: %v: %s", err, stderr.String())
+	}
+	<-done
+
+	// 3 s at 10 fps; allow a frame or two either way at the edges.
+	if len(frames) < 25 || len(frames) > 32 {
+		t.Fatalf("got %d preview frames from 3 s, want about 30", len(frames))
+	}
+	for i, j := range frames {
+		if j[0] != 0xFF || j[1] != 0xD8 || j[len(j)-2] != 0xFF || j[len(j)-1] != 0xD9 {
+			t.Fatalf("frame %d is not a whole JPEG (%d bytes)", i, len(j))
+		}
+	}
 }

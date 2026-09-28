@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 /// The engine ran and refused, with a message meant for the user.
 class EngineError implements Exception {
@@ -43,6 +44,9 @@ class Status {
 /// than on the process, so it can be tested without spawning one.
 abstract class CameraEngine {
   Stream<Status> get statuses;
+
+  /// What the camera sees, as small JPEGs, while it is on.
+  Stream<Uint8List> get frames;
   Future<List<String>> cameras();
   Future<void> start({String? camera});
   Future<void> stop();
@@ -62,6 +66,10 @@ class Engine implements CameraEngine {
   final _statuses = StreamController<Status>.broadcast();
   @override
   Stream<Status> get statuses => _statuses.stream;
+
+  final _frames = StreamController<Uint8List>.broadcast();
+  @override
+  Stream<Uint8List> get frames => _frames.stream;
 
   bool get isRunning => _process != null;
 
@@ -85,6 +93,7 @@ class Engine implements CameraEngine {
     if (_process != null) return;
     final process = await Process.start(_executable, [
       '-json',
+      '-preview',
       if (camera != null && camera.isNotEmpty) ...['-device', camera],
     ]);
     _process = process;
@@ -92,7 +101,15 @@ class Engine implements CameraEngine {
     process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
       if (!line.startsWith('{')) return;
       try {
-        _statuses.add(Status.fromJson(jsonDecode(line) as Map<String, dynamic>));
+        final json = jsonDecode(line) as Map<String, dynamic>;
+        // Preview frames share the pipe with status lines; a "frame" key
+        // tells them apart.
+        final frame = json['frame'] as String?;
+        if (frame != null) {
+          _frames.add(base64Decode(frame));
+        } else {
+          _statuses.add(Status.fromJson(json));
+        }
       } catch (_) {
         // A partial line while the engine is starting is not worth reporting.
       }
