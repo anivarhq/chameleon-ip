@@ -156,3 +156,31 @@ func TestParameterSetsArrivingSeparately(t *testing.T) {
 		t.Fatalf("a keyframe goes out as %d NAL units; want SPS, PPS, IDR", len(got))
 	}
 }
+
+// The phone apps' buffers are theirs: gomobile passes a byte slice by
+// reference, valid only during the call. What the camera keeps must survive
+// the caller reusing that memory the moment PushAnnexB returns.
+func TestPushAnnexBOwnsWhatItKeeps(t *testing.T) {
+	cam := New(Config{User: "admin", Pass: "test1234"})
+	cam.cfg.Address = "127.0.0.1:" + freePort(t)
+	cam.cfg.ONVIFAddress = "127.0.0.1:" + freePort(t)
+	if err := cam.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer cam.Stop()
+
+	sps := []byte{0x67, 0x42, 0x00, 0x1f}
+	pps := []byte{0x68, 0xce, 0x38, 0x80}
+	config := append(append(append([]byte{0, 0, 0, 1}, sps...), 0, 0, 0, 1), pps...)
+	if err := cam.PushAnnexB(config, 0); err != nil {
+		t.Fatal(err)
+	}
+	clear(config) // what the app does with its buffer next
+
+	cam.mu.Lock()
+	gotSPS, gotPPS := cam.sps, cam.pps
+	cam.mu.Unlock()
+	if !bytes.Equal(gotSPS, sps) || !bytes.Equal(gotPPS, pps) {
+		t.Fatalf("kept sps=% x pps=% x after the caller reused its buffer", gotSPS, gotPPS)
+	}
+}

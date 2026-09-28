@@ -267,8 +267,15 @@ func (c *Camera) Viewers() int {
 
 // PushAnnexB sends one encoded frame, as start-code-delimited NAL units, with
 // its capture time measured from the first frame.
+//
+// The frame is copied first. This is what the phone apps call, and gomobile
+// passes a byte slice BY REFERENCE into the app's own memory, valid only for
+// the call. The NAL units cut from it are kept (SPS and PPS for the stream
+// description and every keyframe) and queued for viewers, so without a copy
+// they turned to garbage once the app reused the buffer: the stream opened,
+// authenticated, and never decoded ("Invalid NAL unit 0").
 func (c *Camera) PushAnnexB(frame []byte, pts time.Duration) error {
-	return c.PushAU(splitAnnexB(frame), pts)
+	return c.PushAU(splitAnnexB(bytes.Clone(frame)), pts)
 }
 
 // PushAU sends one access unit, already split into NAL units.
