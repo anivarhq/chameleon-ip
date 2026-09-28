@@ -5,6 +5,8 @@
     <string name="stop">Turn off camera</string>
     <string name="off">Camera is off</string>
     <string name="live">Live</string>
+    <!-- The foreground-service notification, while the camera runs. -->
+    <string name="streaming">Camera is on</string>
     <plurals name="live_watching">
         <item quantity="one">Live · %d other device watching</item>
         <item quantity="other">Live · %d other devices watching</item>
