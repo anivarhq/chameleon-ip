@@ -69,13 +69,21 @@ func (d *discovery) start() error {
 	pc := ipv4.NewPacketConn(conn)
 	group := net.IPv4(239, 255, 255, 250)
 	joined := 0
-	ifaces, _ := net.Interfaces()
+	ifaces, err := net.Interfaces()
 	for i := range ifaces {
 		iface := ifaces[i]
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 {
 			continue
 		}
 		if err := pc.JoinGroup(&iface, &net.UDPAddr{IP: group}); err == nil {
+			joined++
+		}
+	}
+	if err != nil {
+		// Android 11 and later forbid the netlink socket Go lists interfaces
+		// with, so on a phone there is no list at all. Join on the system's
+		// default interface instead, which on a phone is the Wi-Fi.
+		if err := pc.JoinGroup(nil, &net.UDPAddr{IP: group}); err == nil {
 			joined++
 		}
 	}

@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ServiceCompat
@@ -26,6 +27,7 @@ import org.json.JSONObject
  */
 class CameraService : Service() {
     private var pipeline: CameraPipeline? = null
+    private var multicast: WifiManager.MulticastLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -65,6 +67,12 @@ class CameraService : Service() {
             .put("height", CameraPipeline.HEIGHT)
             .put("fps", CameraPipeline.FPS)
             .put("bitrate", CameraPipeline.BITRATE)
+        // Android's Wi-Fi drops incoming multicast unless an app holds this,
+        // and ONVIF discovery is multicast: without it, recorders that search
+        // the network never hear the camera answer.
+        multicast = (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
+            .createMulticastLock("chameleon-discovery")
+            .apply { setReferenceCounted(false); acquire() }
         try {
             Mobile.start(config.toString())
             pipeline = CameraPipeline(this).also {
@@ -85,6 +93,7 @@ class CameraService : Service() {
     override fun onDestroy() {
         pipeline?.stop(); pipeline = null
         runCatching { Mobile.stop() }
+        multicast?.release(); multicast = null
         super.onDestroy()
     }
 
