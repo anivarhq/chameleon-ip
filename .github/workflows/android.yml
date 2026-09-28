@@ -86,7 +86,7 @@ jobs:
           "$bt/zipalign" -c -P 16 -v 4 "$apk" > /dev/null
           "$bt/aapt2" dump badging "$apk" | tee badging.txt | head -3
           grep -q "package: name='com.anivarhq.chameleon'" badging.txt
-          grep -q "^sdkVersion:'24'" badging.txt   # aapt2's name for minSdk
+          grep -q "^minSdkVersion:'24'" badging.txt
           mkdir -p out && cp "$apk" out/ChameleonIP-android.apk
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

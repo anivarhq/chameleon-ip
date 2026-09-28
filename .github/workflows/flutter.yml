@@ -91,12 +91,17 @@ jobs:
         if: matrix.platform == 'macos'
         working-directory: flutter/macos/Runner
         run: |
+          # Absent means not sandboxed; newer templates may leave it out.
           for f in Release.entitlements DebugProfile.entitlements; do
-            plutil -replace com.apple.security.app-sandbox -bool NO "$f"
+            plutil -remove com.apple.security.app-sandbox "$f" 2>/dev/null || true
           done
-          plutil -insert NSCameraUsageDescription -string "Chameleon IP streams this camera to the recorder you add it to." Info.plist
+          for key in NSCameraUsageDescription NSLocalNetworkUsageDescription; do
+            plutil -remove "$key" Info.plist 2>/dev/null || true
+          done
+          plutil -insert NSCameraUsageDescription -string "Chameleon IP shows this camera's picture, and serves it to any recorder you add it to." Info.plist
           plutil -insert NSLocalNetworkUsageDescription -string "Chameleon IP serves the camera on your local network, so a recorder can find it and add it." Info.plist
-          plutil -p Release.entitlements; plutil -p Info.plist | grep UsageDescription
+          ! grep -q app-sandbox Release.entitlements
+          plutil -p Info.plist | grep UsageDescription
 
       - name: analyze
         working-directory: flutter
