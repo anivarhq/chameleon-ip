@@ -23,10 +23,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.NoActionBar">
 
+        <!-- Landscape, not whatever way the phone is held: the stream is in
+             the camera sensor's orientation, which is landscape. Held upright,
+             the screen showed an upright picture while every recorder got it
+             on its side (seen on the emulator). Fixed to landscape, what you
+             see is what recorders get, on the usual 90-degree back camera. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="fullSensor">
+            android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
